@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "typora-pic-cleaner"
+version = "0.1.0"
+description = "Find and remove images your Typora notes no longer reference (macOS and Windows)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+keywords = ["typora", "markdown", "images", "cleanup", "unused"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: MacOS :: MacOS X",
+  "Operating System :: Microsoft :: Windows",
+  "Programming Language :: Python :: 3",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed for `clean --trash-system`; the in-vault trash needs nothing.
+systemtrash = ["send2trash>=1.8"]
+
+[project.scripts]
+typora-pic-cleaner = "typora_pic_cleaner.cli:main"
+
+[project.gui-scripts]
+typora-pic-cleaner-gui = "typora_pic_cleaner.gui:main"
+
+[tool.setuptools]
+packages = ["typora_pic_cleaner"]

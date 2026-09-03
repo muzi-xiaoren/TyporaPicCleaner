@@ -1,0 +1,29 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      # The suite is standard-library only, so there is nothing to install.
+      # Warnings are errors here: a leaked file handle while walking a large
+      # vault is exactly the kind of bug that only shows up at scale.
+      - name: Run tests
+        run: python -W error::ResourceWarning -m unittest discover -s tests -t . -v
+      - name: Check the GUI imports
+        # Linux runners have no display, so only the import is checked there.
+        run: python -c "import typora_pic_cleaner.gui"
