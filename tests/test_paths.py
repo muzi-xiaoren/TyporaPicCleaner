@@ -14,6 +14,15 @@ from typora_pic_cleaner.paths import (
 )
 
 
+def anchored(*parts: str) -> str:
+    """An absolute path on whatever drive the tests are running from.
+
+    A bare "\\v\\notes" is drive-*relative* on Windows, so comparing it against
+    what the resolver returns would only ever pass on POSIX.
+    """
+    return os.path.abspath(os.path.join(os.sep, *parts))
+
+
 class VariantTests(unittest.TestCase):
     def test_percent_encoding_yields_both_readings(self):
         self.assertEqual({"a/b%20c.png", "a/b c.png"}, set(reference_variants("a/b%20c.png")))
@@ -49,33 +58,33 @@ class VariantTests(unittest.TestCase):
 
 class ResolveTests(unittest.TestCase):
     def test_relative_resolves_against_the_note_first(self):
-        got = resolve_reference("img/a.png", os.path.join(os.sep, "v", "notes"), (os.sep + "v",))
-        self.assertEqual(os.path.join(os.sep, "v", "notes", "img", "a.png"), got[0])
+        got = resolve_reference("img/a.png", anchored("v", "notes"), (anchored("v"),))
+        self.assertEqual(anchored("v", "notes", "img", "a.png"), got[0])
 
     def test_extra_bases_are_also_tried(self):
-        got = resolve_reference("img/a.png", os.path.join(os.sep, "v", "notes"), (os.sep + "v",))
-        self.assertIn(os.path.join(os.sep, "v", "img", "a.png"), got)
+        got = resolve_reference("img/a.png", anchored("v", "notes"), (anchored("v"),))
+        self.assertIn(anchored("v", "img", "a.png"), got)
 
     def test_root_relative_link_resolves_against_the_vault(self):
-        got = resolve_reference("/img/a.png", os.path.join(os.sep, "v", "notes"), (os.sep + "v",))
-        self.assertIn(os.path.join(os.sep, "v", "img", "a.png"), got)
+        got = resolve_reference("/img/a.png", anchored("v", "notes"), (anchored("v"),))
+        self.assertIn(anchored("v", "img", "a.png"), got)
 
     def test_parent_traversal_is_resolved_not_rejected(self):
         # Resolution stays honest about where the link points; refusing to act on
         # an outside path is the containment guard's job, not this function's.
-        got = resolve_reference("../../etc/a.png", os.path.join(os.sep, "v", "notes"), ())
-        self.assertEqual([os.path.join(os.sep, "etc", "a.png")], got)
+        got = resolve_reference("../../etc/a.png", anchored("v", "notes"), ())
+        self.assertEqual([anchored("etc", "a.png")], got)
 
 
 class GuardTests(unittest.TestCase):
     def test_is_within_accepts_descendants_and_the_root_itself(self):
-        root = os.path.join(os.sep, "vault")
+        root = anchored("vault")
         self.assertTrue(is_within(os.path.join(root, "a", "b.png"), root))
         self.assertTrue(is_within(root, root))
 
     def test_is_within_rejects_siblings_and_traversal(self):
-        root = os.path.join(os.sep, "vault")
-        self.assertFalse(is_within(os.path.join(os.sep, "vault-other", "a.png"), root))
+        root = anchored("vault")
+        self.assertFalse(is_within(anchored("vault-other", "a.png"), root))
         self.assertFalse(is_within(os.path.join(root, "..", "etc", "a.png"), root))
 
     def test_extension_whitelist(self):
@@ -89,7 +98,7 @@ class GuardTests(unittest.TestCase):
 class KeyerTests(unittest.TestCase):
     def test_dot_segments_normalise_to_the_same_key(self):
         keyer = PathKeyer()
-        base = os.path.join(os.sep, "v", "notes")
+        base = anchored("v", "notes")
         self.assertEqual(
             keyer.key(os.path.join(base, "..", "notes", "a.png")),
             keyer.key(os.path.join(base, "a.png")),
