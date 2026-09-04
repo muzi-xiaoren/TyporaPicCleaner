@@ -25,22 +25,65 @@
 
 ## 安装
 
-**下载现成的可执行文件**（推荐）：到 [Releases](https://github.com/muzi-xiaoren/TyporaPicCleaner/releases) 下载 macOS 或 Windows 的单文件版本，双击直接开图形界面，也可以在终端里当命令用。
+### 下载现成的可执行文件（推荐）
 
-**从源码运行**（需要 Python 3.9+）：
+到 [Releases](https://github.com/muzi-xiaoren/TyporaPicCleaner/releases) 按需下载：
+
+| 你的系统 | 想双击用图形界面 | 想在终端用命令 |
+|---|---|---|
+| macOS（Apple 芯片） | `TyporaPicCleaner-macos-arm64.zip` | `typora-pic-cleaner-cli-macos-arm64.zip` |
+| macOS（Intel） | `TyporaPicCleaner-macos-x86_64.zip` | `typora-pic-cleaner-cli-macos-x86_64.zip` |
+| Windows | `TyporaPicCleaner-windows.exe` | `typora-pic-cleaner-cli-windows.exe` |
+
+macOS 的两个都是 zip，**这是故意的**：浏览器下载裸的 Unix 可执行文件会剥掉执行权限，装在 zip 里才能保住。解压后：
+
+- 图形界面版是 `TyporaPicCleaner.app`，双击即可，**不会弹出终端窗口**
+- 命令行版解压出来直接就能跑，不需要 `chmod +x`
+
+**macOS 首次打开可能被系统拦住**（本项目未做 Apple 签名和公证）。看到「无法验证开发者」时，右键点 App → **打开**，确认一次即可；以后正常双击。或者用命令去掉隔离标记：
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/TyporaPicCleaner.app
+```
+
+**Windows 首次打开可能出现 SmartScreen 提示**「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」。
+
+同样是未签名导致的。彻底解决需要 Apple Developer 账号和 Windows 代码签名证书，本项目暂时没有。
+
+### 从源码运行
+
+需要 Python 3.9+，无第三方依赖：
 
 ```bash
 git clone https://github.com/muzi-xiaoren/TyporaPicCleaner.git
 cd TyporaPicCleaner
 python3 -m typora_pic_cleaner scan ~/Documents/Notes
+python3 -m typora_pic_cleaner gui
 ```
 
-**用 pip 安装**：
+> macOS 上如果报 `No module named _tkinter`，说明你的 Python 没编进 Tk（Homebrew 版常见）。用系统自带的 `/usr/bin/python3`，或 `brew install python-tk`。只有图形界面需要 Tk，命令行不需要。
+
+### 用 pip 安装
 
 ```bash
 pip install .
 typora-pic-cleaner scan ~/Documents/Notes
 ```
+
+---
+
+## 界面语言
+
+简体中文和 English，**默认跟随系统语言**，无需配置。
+
+- 图形界面：顶部菜单 **语言 / Language** 可随时切换，立即生效
+- 命令行：`--lang zh` / `--lang en`，或设环境变量 `TPC_LANG=zh`
+
+```bash
+typora-pic-cleaner --lang zh scan ~/Documents/Notes
+```
+
+`--json` 输出里的 `layouts` 字段用的是**稳定的英文 key**，不随界面语言变化，方便脚本解析；同时另给一个已翻译的 `layouts_text` 供人看。
 
 ---
 
@@ -52,7 +95,7 @@ typora-pic-cleaner scan ~/Documents/Notes
 typora-pic-cleaner scan ~/Documents/Notes
 ```
 
-输出长这样：
+输出长这样（这里是英文界面；中文系统上会自动显示中文）：
 
 ```
 Notes root : /Users/me/Documents/Notes
@@ -156,6 +199,7 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 
 | 参数 | 作用 |
 |---|---|
+| `--lang zh` / `--lang en` | 界面语言，默认跟随系统 |
 | `--images DIR` | 额外的图片目录，可重复 |
 | `--paranoid` | 正文里**光是提到**某个文件名也算引用。保留得更多、删得更少，不确定时用它 |
 | `--ext .psd` | 把额外的扩展名也当图片，可重复 |
@@ -175,7 +219,9 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 python3 -m unittest discover -s tests -t . -v
 ```
 
-CI 在 Linux / macOS / Windows × Python 3.9 / 3.13 上跑同一套测试，并把 `ResourceWarning` 当错误处理。打 `v*` tag 会自动用 PyInstaller 构建 macOS 和 Windows 单文件版并发布 Release。
+CI 在 Linux / macOS / Windows × Python 3.9 / 3.13 上跑同一套测试，并把 `ResourceWarning` 当错误处理。
+
+打 `v*` tag 会自动构建并发布 Release：macOS 分 arm64 / x86_64 两种架构，每种都出「窗口版 .app」和「命令行版」；Windows 出对应的两个 exe。发布前会用打包好的产物跑一遍真实扫描做冒烟测试，确认产物本身可用、且 zip 里的执行权限没丢。
 
 ## License
 

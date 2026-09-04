@@ -132,9 +132,9 @@ class LayoutDetectionTests(VaultTestCase):
         self.write("note.md", "![](note.assets/a.png)\n")
         self.image("note.assets/a.png")
         self.image("assets/b.png")
-        layouts = " ".join(analyze(self.vault).layouts)
-        self.assertIn(".assets", layouts)
-        self.assertIn("shared image folders", layouts)
+        keys = [key for key, _params in analyze(self.vault).layouts]
+        self.assertIn("layout.sibling_assets", keys)
+        self.assertIn("layout.shared_folders", keys)
 
 
 if __name__ == "__main__":

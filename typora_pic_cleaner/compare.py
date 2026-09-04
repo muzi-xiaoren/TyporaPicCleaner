@@ -25,7 +25,7 @@ class RefSite:
 class Analysis:
     md_root: str
     image_dirs: tuple[str, ...]
-    layouts: list[str] = field(default_factory=list)
+    layouts: list[tuple[str, dict]] = field(default_factory=list)
     md_count: int = 0
     total_images: int = 0
     referenced: int = 0

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import List, Tuple
 
+from .i18n import t
 from .paths import IMAGE_EXTS, has_image_ext
 
 MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdown", ".mkd", ".mdwn", ".mdtxt"})
@@ -93,29 +95,31 @@ def merge(walks: list[Walk]) -> Walk:
     return merged
 
 
-def detect_layouts(walk: Walk, image_dirs: tuple[str, ...], md_root: str) -> list[str]:
+def detect_layouts(
+    walk: Walk, image_dirs: Tuple[str, ...], md_root: str
+) -> List[Tuple[str, dict]]:
     """Describe how this vault stores its pictures.
 
-    Purely informational, but worth printing: it is the quickest way for the
-    user to notice that we are looking in the wrong place before anything gets
-    moved.
+    Returned as ``(message key, parameters)`` pairs rather than finished
+    sentences: the human report translates them, while ``--json`` keeps a
+    stable, locale-independent shape for scripts.
     """
-    layouts: list[str] = []
+    layouts: List[Tuple[str, dict]] = []
     if walk.asset_dirs:
-        layouts.append(f"sibling .assets folders ({len(walk.asset_dirs)} found)")
+        layouts.append(("layout.sibling_assets", {"count": len(walk.asset_dirs)}))
 
-    shared: set[str] = set()
+    shared = set()
     for image in walk.images:
         parent = os.path.basename(os.path.dirname(image.path)).lower()
         if parent in SHARED_IMAGE_DIRNAMES:
             shared.add(os.path.dirname(image.path))
     if shared:
-        layouts.append(f"shared image folders ({len(shared)}: " + ", ".join(
-            sorted(os.path.basename(p) for p in shared)[:4]) + ")")
+        names = ", ".join(sorted(os.path.basename(p) for p in shared)[:4])
+        layouts.append(("layout.shared_folders", {"count": len(shared), "names": names}))
 
     external = [d for d in image_dirs if not _under(d, md_root)]
     if external:
-        layouts.append("global image folder outside the note tree (" + ", ".join(external) + ")")
+        layouts.append(("layout.global_folder", {"dirs": ", ".join(external)}))
 
     # Images inside a folder the user explicitly named are not "loose" -- that
     # folder is the whole point of passing --images.
@@ -126,8 +130,8 @@ def detect_layouts(walk: Walk, image_dirs: tuple[str, ...], md_root: str) -> lis
         and not any(_under(image.path, image_dir) for image_dir in image_dirs)
     )
     if loose:
-        layouts.append(f"{loose} image(s) sitting directly beside notes")
-    return layouts or ["no images found"]
+        layouts.append(("layout.loose", {"count": loose}))
+    return layouts or [("layout.none", {})]
 
 
 def _under(path: str, root: str) -> bool:

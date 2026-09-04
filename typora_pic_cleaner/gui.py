@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .actions import UnsafePath, list_batches, move_to_trash, restore_batch, trash_root_for
 from .compare import Analysis, analyze
+from .i18n import get_language, set_language, t
 from .report import human_size
 
 
@@ -24,17 +25,23 @@ class App:
         self.root = root
         self.analysis: Analysis | None = None
         self.results: "queue.Queue[tuple[str, object]]" = queue.Queue()
+        # Widgets whose label is a fixed string, so switching language can
+        # rewrite them in place instead of rebuilding the window.
+        self._labelled: list[tuple[tk.Widget, str]] = []
 
-        root.title("Typora Pic Cleaner")
-        root.geometry("940x600")
-        root.minsize(760, 460)
+        root.title(t("gui.title"))
+        root.geometry("980x620")
+        root.minsize(780, 480)
 
         self.notes_dir = tk.StringVar(value=initial_root)
         self.image_dir = tk.StringVar()
         self.paranoid = tk.BooleanVar(value=False)
         self.system_trash = tk.BooleanVar(value=False)
-        self.status = tk.StringVar(value="Pick your Typora notes folder, then scan.")
+        self.language = tk.StringVar(value=get_language())
+        self.status = tk.StringVar(value=t("gui.status.start"))
+        self._status_is_default = True
 
+        self._build_menu()
         self._build_paths_frame()
         self._build_options_frame()
         self._build_table()
@@ -43,39 +50,70 @@ class App:
 
     # ---------------------------------------------------------------- layout
 
+    def _track(self, widget: tk.Widget, key: str) -> tk.Widget:
+        self._labelled.append((widget, key))
+        return widget
+
+    def _build_menu(self) -> None:
+        menubar = tk.Menu(self.root)
+        self._language_menu = tk.Menu(menubar, tearoff=False)
+        for code in ("en", "zh"):
+            self._language_menu.add_radiobutton(
+                label=t(f"gui.menu.lang.{code}"),
+                value=code,
+                variable=self.language,
+                command=self._change_language,
+            )
+        menubar.add_cascade(label=t("gui.menu.language"), menu=self._language_menu)
+        self._menubar = menubar
+        self.root.configure(menu=menubar)
+
     def _build_paths_frame(self) -> None:
         frame = ttk.Frame(self.root, padding=(10, 10, 10, 4))
         frame.pack(fill="x")
         frame.columnconfigure(1, weight=1)
 
-        ttk.Label(frame, text="Notes folder").grid(row=0, column=0, sticky="w")
+        self._track(ttk.Label(frame, text=t("gui.notes_folder")), "gui.notes_folder").grid(
+            row=0, column=0, sticky="w"
+        )
         ttk.Entry(frame, textvariable=self.notes_dir).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(frame, text="Browse...", command=self._pick_notes).grid(row=0, column=2)
+        self._track(
+            ttk.Button(frame, text=t("gui.browse"), command=self._pick_notes), "gui.browse"
+        ).grid(row=0, column=2)
 
-        ttk.Label(frame, text="Image folder").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(frame, textvariable=self.image_dir).grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
-        ttk.Button(frame, text="Browse...", command=self._pick_images).grid(row=1, column=2, pady=(6, 0))
-        ttk.Label(
-            frame,
-            text="Optional: only needed when Typora saves images outside the notes folder.",
-            foreground="#666",
+        self._track(ttk.Label(frame, text=t("gui.image_folder")), "gui.image_folder").grid(
+            row=1, column=0, sticky="w", pady=(6, 0)
+        )
+        ttk.Entry(frame, textvariable=self.image_dir).grid(
+            row=1, column=1, sticky="ew", padx=6, pady=(6, 0)
+        )
+        self._track(
+            ttk.Button(frame, text=t("gui.browse"), command=self._pick_images), "gui.browse"
+        ).grid(row=1, column=2, pady=(6, 0))
+        self._track(
+            ttk.Label(frame, text=t("gui.image_folder.hint"), foreground="#666"),
+            "gui.image_folder.hint",
         ).grid(row=2, column=1, sticky="w", padx=6)
 
     def _build_options_frame(self) -> None:
         frame = ttk.Frame(self.root, padding=(10, 6))
         frame.pack(fill="x")
-        ttk.Checkbutton(
-            frame, text="Cautious mode (also keep images merely named in the text)",
-            variable=self.paranoid,
+        self._track(
+            ttk.Checkbutton(frame, text=t("gui.cautious"), variable=self.paranoid), "gui.cautious"
         ).pack(side="left")
-        ttk.Checkbutton(frame, text="Use system trash", variable=self.system_trash).pack(side="left", padx=(14, 0))
+        self._track(
+            ttk.Checkbutton(frame, text=t("gui.use_system_trash"), variable=self.system_trash),
+            "gui.use_system_trash",
+        ).pack(side="left", padx=(14, 0))
 
-        self.scan_button = ttk.Button(frame, text="Scan", command=self._scan)
-        self.scan_button.pack(side="right")
-        self.delete_button = ttk.Button(frame, text="Move selected to trash", command=self._clean, state="disabled")
-        self.delete_button.pack(side="right", padx=6)
-        self.restore_button = ttk.Button(frame, text="Undo last clean", command=self._restore)
-        self.restore_button.pack(side="right", padx=6)
+        self.scan_button = ttk.Button(frame, text=t("gui.scan"), command=self._scan)
+        self._track(self.scan_button, "gui.scan").pack(side="right")
+        self.delete_button = ttk.Button(
+            frame, text=t("gui.move_selected"), command=self._clean, state="disabled"
+        )
+        self._track(self.delete_button, "gui.move_selected").pack(side="right", padx=6)
+        self.restore_button = ttk.Button(frame, text=t("gui.undo"), command=self._restore)
+        self._track(self.restore_button, "gui.undo").pack(side="right", padx=6)
 
     def _build_table(self) -> None:
         frame = ttk.Frame(self.root, padding=(10, 0))
@@ -83,19 +121,23 @@ class App:
 
         toolbar = ttk.Frame(frame)
         toolbar.pack(fill="x", pady=(0, 4))
-        ttk.Button(toolbar, text="Select all", command=lambda: self._set_all(True)).pack(side="left")
-        ttk.Button(toolbar, text="Select none", command=lambda: self._set_all(False)).pack(side="left", padx=4)
+        self._track(
+            ttk.Button(toolbar, text=t("gui.select_all"), command=lambda: self._set_all(True)),
+            "gui.select_all",
+        ).pack(side="left")
+        self._track(
+            ttk.Button(toolbar, text=t("gui.select_none"), command=lambda: self._set_all(False)),
+            "gui.select_none",
+        ).pack(side="left", padx=4)
         self.summary = ttk.Label(toolbar, text="")
         self.summary.pack(side="right")
 
         columns = ("keep", "size", "path")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="extended")
-        self.tree.heading("keep", text="Delete?")
-        self.tree.heading("size", text="Size")
-        self.tree.heading("path", text="Unreferenced image")
-        self.tree.column("keep", width=70, anchor="center", stretch=False)
+        self.tree.column("keep", width=80, anchor="center", stretch=False)
         self.tree.column("size", width=90, anchor="e", stretch=False)
         self.tree.column("path", width=700, anchor="w")
+        self._retranslate_headings()
         scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
@@ -114,24 +156,43 @@ class App:
         # The one failure mode a careful list cannot rule out: notes that link
         # these images but live outside the folder being scanned.  Worth saying
         # on screen, not only in the README.
-        ttk.Label(
-            bar,
-            text="Files go to a recoverable trash. Scan the folder that contains ALL "
-                 "notes linking these images -- links from outside it cannot be seen.",
-            foreground="#8a5a00",
-            wraplength=520,
-            justify="right",
+        self._track(
+            ttk.Label(
+                bar, text=t("gui.caution"), foreground="#8a5a00", wraplength=520, justify="right"
+            ),
+            "gui.caution",
         ).pack(side="right")
+
+    # ------------------------------------------------------------- language
+
+    def _retranslate_headings(self) -> None:
+        self.tree.heading("keep", text=t("gui.column.delete"))
+        self.tree.heading("size", text=t("gui.column.size"))
+        self.tree.heading("path", text=t("gui.column.path"))
+
+    def _change_language(self) -> None:
+        set_language(self.language.get())
+        self.root.title(t("gui.title"))
+        for widget, key in self._labelled:
+            widget.configure(text=t(key))
+        self._retranslate_headings()
+        # Rebuilt rather than relabelled: menu entry text is fixed at creation.
+        self._build_menu()
+        if self._status_is_default:
+            self.status.set(t("gui.status.start"))
+        elif self.analysis:
+            self._set_status_from(self.analysis)
+        self._refresh_summary()
 
     # --------------------------------------------------------------- helpers
 
     def _pick_notes(self) -> None:
-        chosen = filedialog.askdirectory(title="Select your Typora notes folder")
+        chosen = filedialog.askdirectory(title=t("gui.pick_notes_title"))
         if chosen:
             self.notes_dir.set(chosen)
 
     def _pick_images(self) -> None:
-        chosen = filedialog.askdirectory(title="Select the folder Typora saves images into")
+        chosen = filedialog.askdirectory(title=t("gui.pick_images_title"))
         if chosen:
             self.image_dir.set(chosen)
 
@@ -159,10 +220,13 @@ class App:
             self.tree.set(item, "keep", "x" if value else "")
         self._refresh_summary()
 
+    def _selected_items(self) -> list[str]:
+        return [item for item in self.tree.get_children() if self.checked.get(item, True)]
+
     def _refresh_summary(self) -> None:
-        chosen = [item for item in self.tree.get_children() if self.checked.get(item, True)]
+        chosen = self._selected_items()
         total = sum(self.sizes.get(item, 0) for item in chosen)
-        self.summary.configure(text=f"{len(chosen)} selected, {human_size(total)}")
+        self.summary.configure(text=t("gui.summary", count=len(chosen), size=human_size(total)))
         self.delete_button.configure(state="normal" if chosen else "disabled")
 
     # ---------------------------------------------------------------- actions
@@ -170,7 +234,7 @@ class App:
     def _scan(self) -> None:
         notes = self.notes_dir.get().strip()
         if not os.path.isdir(notes):
-            messagebox.showerror("Typora Pic Cleaner", "Please choose an existing notes folder first.")
+            messagebox.showerror(t("gui.title"), t("gui.err.pick_notes_first"))
             return
         image_dirs = tuple(d for d in [self.image_dir.get().strip()] if d)
         # Every Tk variable has to be read here, on the main thread: touching one
@@ -178,7 +242,8 @@ class App:
         paranoid = self.paranoid.get()
         self.scan_button.configure(state="disabled")
         self.delete_button.configure(state="disabled")
-        self.status.set("Scanning...")
+        self.status.set(t("gui.status.scanning"))
+        self._status_is_default = False
 
         def work() -> None:
             try:
@@ -188,6 +253,21 @@ class App:
                 self.results.put(("error", exc))
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _set_status_from(self, analysis: Analysis) -> None:
+        notes = [
+            t("gui.stat.notes_images", notes=analysis.md_count, images=analysis.total_images),
+            t("gui.stat.referenced", count=analysis.referenced),
+            t("gui.stat.unreferenced", count=len(analysis.unreferenced)),
+        ]
+        if analysis.broken:
+            notes.append(t("gui.stat.broken", count=len(analysis.broken)))
+        if analysis.orphan_asset_dirs:
+            notes.append(t("gui.stat.orphans", count=len(analysis.orphan_asset_dirs)))
+        if analysis.external:
+            notes.append(t("gui.stat.external", count=len(analysis.external)))
+        self.status.set(" | ".join(notes))
+        self._status_is_default = False
 
     def _show_analysis(self, analysis: Analysis) -> None:
         self.analysis = analysis
@@ -206,77 +286,78 @@ class App:
             self.checked[item] = True
             self.paths[item] = image.path
             self.sizes[item] = image.size
-
-        notes = [
-            f"{analysis.md_count} notes, {analysis.total_images} images",
-            f"{analysis.referenced} referenced",
-            f"{len(analysis.unreferenced)} unreferenced",
-        ]
-        if analysis.broken:
-            notes.append(f"{len(analysis.broken)} broken links")
-        if analysis.orphan_asset_dirs:
-            notes.append(f"{len(analysis.orphan_asset_dirs)} orphaned .assets folders")
-        if analysis.external:
-            notes.append(f"{len(analysis.external)} links outside the scanned folder")
-        self.status.set(" | ".join(notes))
+        self._set_status_from(analysis)
         self._refresh_summary()
 
     def _clean(self) -> None:
         if not self.analysis:
             return
-        selected = [self.paths[item] for item in self.tree.get_children() if self.checked.get(item, True)]
-        if not selected:
+        items = self._selected_items()
+        if not items:
             return
-        total = human_size(sum(self.sizes[item] for item in self.tree.get_children() if self.checked.get(item, True)))
-        destination = "the system trash" if self.system_trash.get() else trash_root_for(self.analysis.md_root)
+        selected = [self.paths[item] for item in items]
+        total = human_size(sum(self.sizes[item] for item in items))
+        destination = (
+            t("cli.clean.system_trash")
+            if self.system_trash.get()
+            else trash_root_for(self.analysis.md_root)
+        )
         if not messagebox.askyesno(
-            "Move to trash?",
-            f"Move {len(selected)} file(s) ({total}) to:\n{destination}\n\n"
-            "Nothing is erased -- use \"Undo last clean\" to put them back.",
+            t("gui.confirm.move_title"),
+            t("gui.confirm.move_body", count=len(selected), size=total, destination=destination),
         ):
             return
         roots = (self.analysis.md_root,) + self.analysis.image_dirs
         try:
             batch = move_to_trash(
-                selected, roots=roots, md_root=self.analysis.md_root,
+                selected,
+                roots=roots,
+                md_root=self.analysis.md_root,
                 system_trash=self.system_trash.get(),
             )
         except UnsafePath as exc:
-            messagebox.showerror("Typora Pic Cleaner", str(exc))
+            messagebox.showerror(t("gui.title"), str(exc))
             return
-        message = f"Moved {len(batch.entries)} file(s), {human_size(batch.moved_bytes)}."
+        message = t("gui.info.moved", count=len(batch.entries), size=human_size(batch.moved_bytes))
         if batch.failures:
-            message += f"\n\n{len(batch.failures)} could not be moved:\n" + "\n".join(batch.failures[:8])
-        messagebox.showinfo("Typora Pic Cleaner", message)
+            message += "\n\n" + t("gui.info.move_failures", count=len(batch.failures)) + "\n"
+            message += "\n".join(batch.failures[:8])
+        messagebox.showinfo(t("gui.title"), message)
         self._scan()
 
     def _restore(self) -> None:
         notes = self.notes_dir.get().strip()
         if not os.path.isdir(notes):
-            messagebox.showerror("Typora Pic Cleaner", "Please choose the notes folder that was cleaned.")
+            messagebox.showerror(t("gui.title"), t("gui.err.pick_cleaned_folder"))
             return
         batches = list_batches(notes)
         if not batches:
-            messagebox.showinfo("Typora Pic Cleaner", f"No clean-up history under\n{trash_root_for(notes)}")
+            messagebox.showinfo(t("gui.title"), t("gui.info.no_history", path=trash_root_for(notes)))
             return
         newest = batches[0]
-        count = len(newest.get("entries", []))
         if not messagebox.askyesno(
-            "Undo last clean?",
-            f"Put back {count} file(s) from batch {newest.get('batch_id')} ({newest.get('created')})?",
+            t("gui.confirm.undo_title"),
+            t(
+                "gui.confirm.undo_body",
+                count=len(newest.get("entries", [])),
+                batch=newest.get("batch_id"),
+                created=newest.get("created"),
+            ),
         ):
             return
         try:
             result = restore_batch(notes)
         except UnsafePath as exc:
-            messagebox.showerror("Typora Pic Cleaner", str(exc))
+            messagebox.showerror(t("gui.title"), str(exc))
             return
-        message = f"Restored {len(result.restored)} file(s)."
+        message = t("gui.info.restored", count=len(result.restored))
         if result.skipped:
-            message += f"\n\nSkipped {len(result.skipped)} (a file already exists there):\n" + "\n".join(result.skipped[:8])
+            message += "\n\n" + t("gui.info.restore_skipped", count=len(result.skipped)) + "\n"
+            message += "\n".join(result.skipped[:8])
         if result.failures:
-            message += f"\n\nFailed {len(result.failures)}:\n" + "\n".join(result.failures[:8])
-        messagebox.showinfo("Typora Pic Cleaner", message)
+            message += "\n\n" + t("gui.info.restore_failed", count=len(result.failures)) + "\n"
+            message += "\n".join(result.failures[:8])
+        messagebox.showinfo(t("gui.title"), message)
         self._scan()
 
     def _drain_results(self) -> None:
@@ -287,14 +368,15 @@ class App:
                 if kind == "scan":
                     self._show_analysis(payload)  # type: ignore[arg-type]
                 else:
-                    self.status.set("Scan failed.")
-                    messagebox.showerror("Typora Pic Cleaner", str(payload))
+                    self.status.set(t("gui.status.scan_failed"))
+                    messagebox.showerror(t("gui.title"), str(payload))
         except queue.Empty:
             pass
         self.root.after(120, self._drain_results)
 
 
 def main(initial_root: str = "") -> int:
+    set_language(None)
     root = tk.Tk()
     App(root, initial_root=initial_root)
     root.mainloop()

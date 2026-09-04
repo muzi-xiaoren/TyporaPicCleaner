@@ -7,11 +7,17 @@ import shutil
 import tempfile
 import unittest
 
+from typora_pic_cleaner.i18n import set_language
+
 
 class VaultTestCase(unittest.TestCase):
     """A temp directory plus helpers for writing notes and dummy images."""
 
     def setUp(self) -> None:
+        # Pin the language: otherwise these assertions pass or fail depending on
+        # the machine's system language.
+        set_language("en")
+        self.addCleanup(set_language, "en")
         self.vault = os.path.realpath(tempfile.mkdtemp(prefix="tpc-test-"))
         self.addCleanup(shutil.rmtree, self.vault, ignore_errors=True)
 

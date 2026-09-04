@@ -14,35 +14,96 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            asset: typora-pic-cleaner-macos
+          - os: macos-latest        # Apple Silicon
+            arch: arm64
+          - os: macos-13            # Intel
+            arch: x86_64
           - os: windows-latest
-            asset: typora-pic-cleaner-windows
+            arch: x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
       - name: Install build tools
         run: python -m pip install --upgrade pyinstaller send2trash
+
       - name: Run tests before packaging
         run: python -m unittest discover -s tests -t . -q
-      - name: Build a single-file binary
+
+      # Two separate builds on purpose.  A windowed bundle is what Finder and
+      # Explorer can launch without spawning a terminal, and a console binary is
+      # what actually works when piped or scripted.
+      - name: Build the windowed app
         run: >
-          pyinstaller --onefile --name ${{ matrix.asset }}
-          --collect-submodules tkinter
+          pyinstaller --noconfirm --clean --windowed
+          --name TyporaPicCleaner
+          --osx-bundle-identifier com.muzi-xiaoren.typorapiccleaner
           run_gui.py
-      - name: Smoke-test the binary (macOS)
+
+      - name: Build the console CLI
+        run: >
+          pyinstaller --noconfirm --clean --onefile
+          --name typora-pic-cleaner
+          run_cli.py
+
+      # A browser download strips the execute bit from a bare Unix file, so
+      # every macOS artifact ships inside an archive that preserves permissions.
+      - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: ./dist/${{ matrix.asset }} --version
-      - name: Smoke-test the binary (Windows)
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            "dist/TyporaPicCleaner.app" \
+            "TyporaPicCleaner-macos-${{ matrix.arch }}.zip"
+          ditto -c -k "dist/typora-pic-cleaner" \
+            "typora-pic-cleaner-cli-macos-${{ matrix.arch }}.zip"
+          mkdir -p out
+          mv ./*.zip out/
+
+      - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: ./dist/${{ matrix.asset }}.exe --version
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item dist/TyporaPicCleaner.exe out/TyporaPicCleaner-windows.exe
+          Copy-Item dist/typora-pic-cleaner.exe out/typora-pic-cleaner-cli-windows.exe
+
+      # Prove the packaged binary really works, rather than only that it built:
+      # build a miniature vault and check the analysis it reports.
+      - name: Smoke-test the packaged CLI (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mkdir -p fixture/img
+          printf '![](img/used.png)\n' > fixture/note.md
+          printf 'x' > fixture/img/used.png
+          printf 'x' > fixture/img/dead.png
+          unzip -q "out/typora-pic-cleaner-cli-macos-${{ matrix.arch }}.zip" -d unpacked
+          test -x unpacked/typora-pic-cleaner || { echo "execute bit lost in the archive"; exit 1; }
+          ./unpacked/typora-pic-cleaner --version
+          ./unpacked/typora-pic-cleaner scan fixture --json > result.json
+          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;assert d['referenced']==1,d;print('packaged CLI analysis OK')"
+          unzip -q "out/TyporaPicCleaner-macos-${{ matrix.arch }}.zip" -d app
+          test -x "app/TyporaPicCleaner.app/Contents/MacOS/TyporaPicCleaner" || { echo "app binary not executable"; exit 1; }
+          echo "windowed .app packaged OK"
+
+      - name: Smoke-test the packaged CLI (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory -Force -Path fixture/img | Out-Null
+          Set-Content -Path fixture/note.md -Value '![](img/used.png)'
+          Set-Content -Path fixture/img/used.png -Value 'x'
+          Set-Content -Path fixture/img/dead.png -Value 'x'
+          ./out/typora-pic-cleaner-cli-windows.exe --version
+          ./out/typora-pic-cleaner-cli-windows.exe scan fixture --json > result.json
+          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;print('packaged CLI analysis OK')"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset }}
-          path: dist/*
+          name: build-${{ matrix.os }}-${{ matrix.arch }}
+          path: out/*
 
   release:
     needs: build

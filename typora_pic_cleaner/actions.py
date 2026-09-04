@@ -13,6 +13,7 @@ import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
+from .i18n import t
 from .paths import has_image_ext, is_within
 from .scanner import TRASH_DIRNAME
 
@@ -61,11 +62,11 @@ def check_safe(path: str, roots: tuple[str, ...], extra_exts: frozenset[str] = f
     able to steer us out of the tree the user actually pointed at.
     """
     if not has_image_ext(path, extra_exts):
-        raise UnsafePath(f"refusing to touch a non-image file: {path}")
+        raise UnsafePath(t("err.not_an_image", path=path))
     if not any(is_within(path, root) for root in roots):
-        raise UnsafePath(f"refusing to touch a file outside the scanned roots: {path}")
+        raise UnsafePath(t("err.outside_roots", path=path))
     if TRASH_DIRNAME in os.path.abspath(path).split(os.sep):
-        raise UnsafePath(f"already in the trash: {path}")
+        raise UnsafePath(t("err.already_trashed", path=path))
 
 
 def _anchor_for(path: str, roots: tuple[str, ...]) -> int:
@@ -75,7 +76,7 @@ def _anchor_for(path: str, roots: tuple[str, ...]) -> int:
         if is_within(path, root) and len(root) > best_len:
             best, best_len = index, len(root)
     if best < 0:
-        raise UnsafePath(f"no anchor root for {path}")
+        raise UnsafePath(t("err.no_anchor", path=path))
     return best
 
 
@@ -146,10 +147,7 @@ def _system_trash_fn():
     try:
         from send2trash import send2trash  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on environment
-        raise UnsafePath(
-            "--trash-system needs the send2trash package (pip install send2trash); "
-            "omit the flag to use the in-vault trash instead"
-        ) from exc
+        raise UnsafePath(t("err.needs_send2trash")) from exc
     return send2trash
 
 
@@ -232,20 +230,17 @@ def restore_batch(md_root: str, batch_id: str | None = None, dry_run: bool = Fal
     """
     batches = list_batches(md_root)
     if not batches:
-        raise UnsafePath(f"no clean-up history found under {trash_root_for(md_root)}")
+        raise UnsafePath(t("err.no_history", path=trash_root_for(md_root)))
     if batch_id:
         matching = [b for b in batches if b.get("batch_id") == batch_id or os.path.basename(b.get("_dir", "")) == batch_id]
         if not matching:
-            raise UnsafePath(f"no batch named {batch_id}")
+            raise UnsafePath(t("err.no_such_batch", batch=batch_id))
         batch = matching[0]
     else:
         batch = batches[0]
 
     if batch.get("system_trash"):
-        raise UnsafePath(
-            f"batch {batch.get('batch_id')} went to the system trash; "
-            "restore it from Finder or the Recycle Bin"
-        )
+        raise UnsafePath(t("err.batch_in_system_trash", batch=batch.get("batch_id")))
 
     result = RestoreResult()
     anchors = batch.get("anchors", [])
@@ -254,10 +249,10 @@ def restore_batch(md_root: str, batch_id: str | None = None, dry_run: bool = Fal
             source = os.path.join(batch["_dir"], entry["stored"])
             target = os.path.join(anchors[entry["anchor"]], entry["rel"])
             if os.path.exists(target):
-                result.skipped.append(f"{target}: already exists")
+                result.skipped.append(t("err.already_exists", path=target))
                 continue
             if not os.path.exists(source):
-                result.failures.append(f"{source}: missing from the trash")
+                result.failures.append(t("err.missing_from_trash", path=source))
                 continue
             if not dry_run:
                 os.makedirs(os.path.dirname(target), exist_ok=True)
