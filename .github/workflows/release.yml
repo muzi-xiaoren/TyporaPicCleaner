@@ -36,11 +36,22 @@ jobs:
       # Two separate builds on purpose.  A windowed bundle is what Finder and
       # Explorer can launch without spawning a terminal, and a console binary is
       # what actually works when piped or scripted.
-      - name: Build the windowed app
+      # --windowed alone gives a one-directory build.  On macOS that directory
+      # *is* the .app bundle, which is what we want; on Windows it is a plain
+      # folder, so the exe has to be requested with --onefile.
+      - name: Build the windowed app (macOS)
+        if: runner.os == 'macOS'
         run: >
           pyinstaller --noconfirm --clean --windowed
           --name TyporaPicCleaner
           --osx-bundle-identifier com.muzi-xiaoren.typorapiccleaner
+          run_gui.py
+
+      - name: Build the windowed app (Windows)
+        if: runner.os == 'Windows'
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name TyporaPicCleaner
           run_gui.py
 
       - name: Build the console CLI
@@ -99,6 +110,9 @@ jobs:
           ./out/typora-pic-cleaner-cli-windows.exe --version
           ./out/typora-pic-cleaner-cli-windows.exe scan fixture --json > result.json
           python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;print('packaged CLI analysis OK')"
+          # Subsystem 2 == GUI: this is what stops a console window appearing
+          # behind the interface, so it is worth asserting rather than assuming.
+          python -c "import struct;f=open('out/TyporaPicCleaner-windows.exe','rb');f.seek(60);o=struct.unpack('<I',f.read(4))[0];f.seek(o+24+68);s=struct.unpack('<H',f.read(2))[0];assert s==2,f'subsystem {s}, expected 2 (GUI)';print('windowed exe is a GUI binary OK')"
 
       - uses: actions/upload-artifact@v4
         with:
