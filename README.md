@@ -33,6 +33,8 @@
 |---|---|---|
 | macOS（Apple 芯片） | `TyporaPicCleaner-macos-arm64.zip` | `typora-pic-cleaner-cli-macos-arm64.zip` |
 | macOS（Intel） | `TyporaPicCleaner-macos-x86_64.zip` | `typora-pic-cleaner-cli-macos-x86_64.zip` |
+
+> Intel 版依赖 GitHub 的 Intel 构建机,偶尔会缺。如果 Release 里没有 x86_64 的包,直接从源码跑即可(见下),功能完全一样。
 | Windows | `TyporaPicCleaner-windows.exe` | `typora-pic-cleaner-cli-windows.exe` |
 
 macOS 的两个都是 zip，**这是故意的**：浏览器下载裸的 Unix 可执行文件会剥掉执行权限，装在 zip 里才能保住。解压后：

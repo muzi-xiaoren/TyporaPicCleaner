@@ -16,11 +16,18 @@ jobs:
         include:
           - os: macos-latest        # Apple Silicon
             arch: arm64
-          - os: macos-13            # Intel
+          # GitHub keeps only the two newest macOS versions, so Intel builds
+          # have to track the current "-intel" label rather than a pinned old
+          # release; a retired label does not fail, it queues forever.
+          - os: macos-15-intel
             arch: x86_64
+            optional: true
           - os: windows-latest
             arch: x64
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # An unavailable runner must not be able to hold the whole release back.
+    continue-on-error: ${{ matrix.optional == true }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
