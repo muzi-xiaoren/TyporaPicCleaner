@@ -87,6 +87,34 @@ def split_front_matter(text: str) -> tuple[str, str]:
     return match.group(1), _blank(text, 0, match.end())
 
 
+# Typora lets a note redefine what a leading "/" means, per file, via YAML
+# front matter.  Missing this makes an in-use image look unreferenced.
+_ROOT_URL_RE = re.compile(r"^[ \t]*typora-root-url[ \t]*:[ \t]*(.+?)[ \t]*$", re.M | re.I)
+
+
+def front_matter_root_url(text: str) -> str | None:
+    """The note's ``typora-root-url``, if it declares one.
+
+    Typora resolves ``/pics/a.png`` against this directory rather than against
+    the vault, so a note carrying it needs its own resolution base.
+    """
+    front_matter, _rest = split_front_matter(text)
+    if not front_matter:
+        return None
+    match = _ROOT_URL_RE.search(front_matter)
+    if not match:
+        return None
+    value = match.group(1).strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    value = value.strip()
+    # Typora also writes Windows roots as "/D:/pics"; drop the stray slash so
+    # the path is usable.
+    if len(value) >= 3 and value[0] == "/" and value[2] == ":":
+        value = value[1:]
+    return value or None
+
+
 def _line_of(text: str, index: int) -> int:
     return text.count("\n", 0, index) + 1
 

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import unittest
 
-from typora_pic_cleaner.refs import extract_references, mask_code, split_front_matter
+from typora_pic_cleaner.refs import (
+    extract_references,
+    front_matter_root_url,
+    mask_code,
+    split_front_matter,
+)
 
 
 def raws(text: str, paranoid: bool = False) -> set[str]:
@@ -80,6 +85,27 @@ class ExtractionTests(unittest.TestCase):
     def test_paranoid_does_not_manufacture_paths_from_urls(self):
         got = raws("![](https://host.example/a.png)", paranoid=True)
         self.assertNotIn("//host.example/a.png", got)
+
+
+class RootUrlTests(unittest.TestCase):
+    def test_plain_value(self):
+        self.assertEqual("../store", front_matter_root_url("---\ntypora-root-url: ../store\n---\n"))
+
+    def test_quoted_values(self):
+        for text in ('---\ntypora-root-url: "../s"\n---\n', "---\ntypora-root-url: '../s'\n---\n"):
+            self.assertEqual("../s", front_matter_root_url(text))
+
+    def test_windows_root_loses_the_stray_slash(self):
+        # Typora writes Windows roots as "/D:/pics", which is not a usable path.
+        self.assertEqual("D:/pics", front_matter_root_url("---\ntypora-root-url: /D:/pics\n---\n"))
+
+    def test_absent(self):
+        self.assertIsNone(front_matter_root_url("---\ntitle: x\n---\n"))
+        self.assertIsNone(front_matter_root_url("# no front matter\n"))
+
+    def test_only_read_from_front_matter(self):
+        # A mention in the body is prose, not configuration.
+        self.assertIsNone(front_matter_root_url("typora-root-url: ../store\n"))
 
 
 class MaskingTests(unittest.TestCase):

@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 
 from .paths import PathKeyer, has_image_ext, is_within, resolve_reference
-from .refs import Reference, extract_references
+from .refs import Reference, extract_references, front_matter_root_url
 from .scanner import ImageFile, Walk, detect_layouts, merge, read_text_best_effort, walk_tree
 
 
@@ -81,10 +81,11 @@ def analyze(
         if error:
             analysis.errors.append(error)
         md_dir = os.path.dirname(md_path)
+        bases = _bases_for(md_dir, extra_bases, front_matter_root_url(text))
         for ref in extract_references(text, paranoid=paranoid):
             candidates: list[str] = []
             for raw in ref.raws:
-                candidates.extend(resolve_reference(raw, md_dir, extra_bases))
+                candidates.extend(resolve_reference(raw, md_dir, bases))
             if not candidates:
                 continue  # remote URL or data: -- nothing on this disk to keep
             matched = [c for c in candidates if keyer.key(c) in on_disk]
@@ -107,6 +108,21 @@ def analyze(
     )
     analysis.orphan_asset_dirs = _orphan_asset_dirs(walk, analysis.unreferenced, keyer)
     return analysis
+
+
+def _bases_for(
+    md_dir: str, extra_bases: tuple[str, ...], root_url: str | None
+) -> tuple[str, ...]:
+    """Resolution bases for one note, honouring its own ``typora-root-url``.
+
+    Put first so it wins for the ``/pics/a.png`` form it exists to serve.  It is
+    used for matching only and never widens what may be deleted: a root outside
+    the scanned tree still has none of its files inventoried.
+    """
+    if not root_url:
+        return extra_bases
+    base = root_url if os.path.isabs(root_url) or root_url[1:2] == ":" else os.path.join(md_dir, root_url)
+    return (os.path.abspath(base),) + extra_bases
 
 
 def _site(md: str, ref: Reference, resolved: str | None) -> RefSite:

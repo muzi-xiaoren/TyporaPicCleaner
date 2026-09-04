@@ -199,6 +199,7 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 | 百分号编码 | `img/%E4%B8%AD%E6%96%87.png` |
 | 反斜杠分隔（Windows） | `note.assets\pic.png` |
 | 以图片根为准的路径 | `/assets/a.png` |
+| 笔记自己声明的图片根 | front-matter 里的 `typora-root-url: ../图床`，此后 `/pics/a.png` 按它解析 |
 | `file://` URL | `file:///C:/pics/a.png` |
 
 **不算引用**：`http(s)://` 远程图、`data:` base64、以及**代码块和行内代码里的路径**（那是文档示例，不是活引用）。

@@ -108,6 +108,64 @@ class GlobalImageFolderTests(VaultTestCase):
         self.assertEqual([os.path.join(pics, "dead.png")], [i.path for i in result.unreferenced])
 
 
+class TyporaRootUrlTests(VaultTestCase):
+    """Typora lets a note redefine "/" per file; ignoring that deletes live images."""
+
+    def test_relative_root_url_inside_the_vault(self):
+        self.write(
+            "notes/deep/post.md",
+            "---\ntypora-root-url: ../../store\n---\n![](/pics/live.png)\n",
+        )
+        self.image("store/pics/live.png")
+        result = analyze(self.vault)
+        self.assertEqual([], result.unreferenced, "the image is in use")
+        self.assertEqual([], result.broken)
+
+    def test_absolute_root_url(self):
+        self.image("store/pics/live.png")
+        self.write(
+            "notes/post.md",
+            f"---\ntypora-root-url: {os.path.join(self.vault, 'store')}\n---\n![](/pics/live.png)\n",
+        )
+        self.assertEqual([], analyze(self.vault).unreferenced)
+
+    def test_quoted_root_url(self):
+        self.write(
+            "notes/post.md",
+            '---\ntypora-root-url: "../store"\n---\n![](/pics/live.png)\n',
+        )
+        self.image("store/pics/live.png")
+        self.assertEqual([], analyze(self.vault).unreferenced)
+
+    def test_root_url_does_not_widen_what_may_be_deleted(self):
+        # A root outside the scanned tree is used for matching only: its files
+        # are never inventoried, so they can never be proposed for deletion.
+        outside = os.path.abspath(os.path.join(self.vault, "..", os.path.basename(self.vault) + "-store"))
+        os.makedirs(os.path.join(outside, "pics"), exist_ok=True)
+        self.addCleanup(lambda: __import__("shutil").rmtree(outside, ignore_errors=True))
+        for name in ("live.png", "dead.png"):
+            with open(os.path.join(outside, "pics", name), "wb") as handle:
+                handle.write(b"\x89PNG")
+        self.write("post.md", f"---\ntypora-root-url: {outside}\n---\n![](/pics/live.png)\n")
+        result = analyze(self.vault)
+        self.assertEqual([], result.unreferenced)
+        self.assertEqual([], result.broken, "the link resolves through the declared root")
+
+    def test_a_note_without_root_url_is_unaffected(self):
+        self.write("a.md", "---\ntitle: plain\n---\n![](/pics/x.png)\n")
+        self.image("pics/x.png")
+        self.assertEqual([], analyze(self.vault).unreferenced)
+
+    def test_root_url_is_per_file_not_global(self):
+        self.write("a.md", "---\ntypora-root-url: ./store-a\n---\n![](/pics/a.png)\n")
+        self.write("b.md", "---\ntypora-root-url: ./store-b\n---\n![](/pics/b.png)\n")
+        self.image("store-a/pics/a.png")
+        self.image("store-b/pics/b.png")
+        self.image("store-a/pics/stale.png")
+        result = analyze(self.vault)
+        self.assertSameFiles([i.path for i in result.unreferenced], ["store-a/pics/stale.png"])
+
+
 class OrphanAssetsTests(VaultTestCase):
     def test_assets_folder_whose_note_is_gone(self):
         self.image("dead.assets/pic.png")
