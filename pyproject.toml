@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "typora-pic-cleaner"
-version = "0.2.0"
+version = "0.2.1"
 description = "Find and remove images your Typora notes no longer reference (macOS and Windows)."
 readme = "README.md"
 requires-python = ">=3.9"

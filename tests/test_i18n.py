@@ -9,7 +9,7 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from tests.helpers import VaultTestCase
+from tests.helpers import ConfigIsolationMixin, VaultTestCase
 from typora_pic_cleaner.cli import main
 from typora_pic_cleaner.i18n import CATALOGUES, EN, SUPPORTED, ZH, detect_language, set_language, t
 
@@ -18,7 +18,7 @@ def placeholders(template: str) -> set:
     return {name for _, name, _, _ in string.Formatter().parse(template) if name}
 
 
-class CatalogueTests(unittest.TestCase):
+class CatalogueTests(ConfigIsolationMixin):
     def tearDown(self):
         set_language("en")
 
@@ -54,7 +54,7 @@ class CatalogueTests(unittest.TestCase):
             self.assertIn(language, CATALOGUES)
 
 
-class LookupTests(unittest.TestCase):
+class LookupTests(ConfigIsolationMixin):
     def tearDown(self):
         set_language("en")
 
@@ -76,7 +76,10 @@ class LookupTests(unittest.TestCase):
         self.assertEqual(EN["gui.summary"], t("gui.summary", wrong=1))
 
 
-class DetectionTests(unittest.TestCase):
+class DetectionTests(ConfigIsolationMixin):
+    def setUp(self):
+        self.isolate_config()
+
     def tearDown(self):
         set_language("en")
 

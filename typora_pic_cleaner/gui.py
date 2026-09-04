@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .actions import UnsafePath, list_batches, move_to_trash, restore_batch, trash_root_for
 from .compare import Analysis, analyze
+from . import prefs
 from .i18n import get_language, set_language, t
 from .report import human_size
 
@@ -172,6 +173,10 @@ class App:
 
     def _change_language(self) -> None:
         set_language(self.language.get())
+        # Remembered so the choice survives a restart, which matters most for
+        # the people who need it: those whose system language is not the one
+        # they want the tool in.
+        prefs.save_language(self.language.get())
         self.root.title(t("gui.title"))
         for widget, key in self._labelled:
             widget.configure(text=t(key))

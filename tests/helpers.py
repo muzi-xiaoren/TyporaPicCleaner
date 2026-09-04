@@ -6,14 +6,32 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest import mock
 
 from typora_pic_cleaner.i18n import set_language
 
 
-class VaultTestCase(unittest.TestCase):
+class ConfigIsolationMixin(unittest.TestCase):
+    """Point the settings file at a temp dir for the duration of a test.
+
+    Without this the suite would read -- and overwrite -- the language the real
+    user picked, and results would depend on it.
+    """
+
+    def isolate_config(self) -> str:
+        directory = tempfile.mkdtemp(prefix="tpc-conf-")
+        self.addCleanup(shutil.rmtree, directory, ignore_errors=True)
+        patcher = mock.patch.dict(os.environ, {"TPC_CONFIG": directory}, clear=False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return directory
+
+
+class VaultTestCase(ConfigIsolationMixin):
     """A temp directory plus helpers for writing notes and dummy images."""
 
     def setUp(self) -> None:
+        self.isolate_config()
         # Pin the language: otherwise these assertions pass or fail depending on
         # the machine's system language.
         set_language("en")

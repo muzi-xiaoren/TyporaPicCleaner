@@ -15,6 +15,8 @@ import os
 import subprocess
 import sys
 
+from . import prefs
+
 DEFAULT = "en"
 SUPPORTED = ("en", "zh")
 
@@ -343,9 +345,17 @@ def _windows_ui_language() -> str | None:
 
 
 def detect_language() -> str:
-    """Best guess at the language this user reads, defaulting to English."""
+    """Best guess at the language this user reads, defaulting to English.
+
+    Order of authority: the ``TPC_LANG`` environment variable, then a language
+    the user picked in the interface before, then POSIX locale variables, then
+    the operating system's own UI language.  The saved choice outranks the OS
+    on purpose -- someone running an English system who switched the tool to
+    Chinese meant it, and should not have to redo it on every launch.
+    """
     for source in (
         os.environ.get("TPC_LANG"),
+        prefs.load_language(),
         os.environ.get("LC_ALL"),
         os.environ.get("LC_MESSAGES"),
         os.environ.get("LANG"),

@@ -76,14 +76,24 @@ typora-pic-cleaner scan ~/Documents/Notes
 
 ## 界面语言
 
-简体中文和 English，**默认跟随系统语言**，无需配置。
+简体中文和 English。
 
-- 图形界面：顶部菜单 **语言 / Language** 可随时切换，立即生效
-- 命令行：`--lang zh` / `--lang en`，或设环境变量 `TPC_LANG=zh`
+**默认跟随系统语言**——注意这里是按系统的**首选语言顺序**判断。比如系统语言列表是 `英文 → 简体中文`，那默认就是英文界面（这是规范做法，尊重你给系统设定的优先级）。
 
-```bash
-typora-pic-cleaner --lang zh scan ~/Documents/Notes
-```
+想固定用中文，三种方式任选：
+
+| 方式 | 做法 | 是否记住 |
+|---|---|---|
+| 图形界面 | 顶部菜单 **语言 / Language** → 简体中文 | **会记住**，下次启动仍是中文 |
+| 命令行单次 | `typora-pic-cleaner --lang zh scan ~/Notes` | 仅本次 |
+| 环境变量 | `export TPC_LANG=zh` | 由你的 shell 配置决定 |
+
+优先级从高到低：`TPC_LANG` 环境变量 → 界面里存下的选择 → 系统语言 → 英文。
+
+界面里选的语言存在这里（删掉即恢复跟随系统）：
+
+- macOS / Linux：`~/.config/typora-pic-cleaner/config.json`
+- Windows：`%APPDATA%\TyporaPicCleaner\config.json`
 
 `--json` 输出里的 `layouts` 字段用的是**稳定的英文 key**，不随界面语言变化，方便脚本解析；同时另给一个已翻译的 `layouts_text` 供人看。
 
