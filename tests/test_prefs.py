@@ -81,3 +81,42 @@ class PreferenceOrderTests(ConfigIsolationMixin):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RememberedFoldersTests(ConfigIsolationMixin):
+    def setUp(self):
+        self.directory = self.isolate_config()
+
+    def test_note_folders_round_trip_with_their_ticks(self):
+        prefs.save_note_folders([("/notes", True), ("/drafts", False)])
+        self.assertEqual([("/notes", True), ("/drafts", False)], prefs.load_note_folders())
+
+    def test_order_survives_because_the_first_folder_anchors_the_undo_history(self):
+        prefs.save_note_folders([("/second", True), ("/first", True)])
+        self.assertEqual(["/second", "/first"], [p for p, _ in prefs.load_note_folders()])
+
+    def test_a_duplicate_path_is_kept_only_once(self):
+        prefs.save_note_folders([("/notes", True), ("/notes", False)])
+        self.assertEqual([("/notes", True)], prefs.load_note_folders())
+
+    def test_a_bare_string_from_an_older_file_still_loads(self):
+        prefs.save(note_folders=["/notes"])
+        self.assertEqual([("/notes", True)], prefs.load_note_folders())
+
+    def test_junk_entries_are_dropped_rather_than_raising(self):
+        prefs.save(note_folders=[None, 3, {}, {"path": ""}, {"path": "/ok"}])
+        self.assertEqual([("/ok", True)], prefs.load_note_folders())
+
+    def test_image_folders_round_trip_and_deduplicate(self):
+        prefs.save_image_folders(["/pics", "/pics", "/more"])
+        self.assertEqual(["/pics", "/more"], prefs.load_image_folders())
+
+    def test_scan_parents_keep_only_the_recent_few(self):
+        prefs.save_scan_parents(["/p%d" % index for index in range(20)])
+        self.assertEqual(8, len(prefs.load_scan_parents()))
+        self.assertEqual("/p0", prefs.load_scan_parents()[0])
+
+    def test_the_language_is_untouched_by_a_folder_save(self):
+        prefs.save_language("zh")
+        prefs.save_note_folders([("/notes", True)])
+        self.assertEqual("zh", prefs.load_language())

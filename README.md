@@ -19,7 +19,9 @@
 
 > 如果你的图片放在统一的 `assets/` 目录里，而**有些引用它们的 .md 文件不在扫描范围内**（比如在另一个文件夹、或已被你移走），工具看不到那些引用，会把图片判为「未引用」。
 >
-> 报告里的 **References outside the scanned tree** 一节就是在提示这类风险。遇到不确定的情况，用 `--paranoid` 或直接把范围扩大到包含所有笔记的上层目录。
+> 报告里的 **References outside the scanned tree** 一节就是在提示这类风险。
+
+这也是为什么 **scan / clean 接受多个笔记文件夹，并把它们当成一个整体一起比对**：几个文件夹交叉引用同一张图时，只有一起扫才不会误判。图形界面左侧的文件夹清单就是为这件事做的——一次勾好，以后每次都记得。不确定时还可以加 `--paranoid`。
 
 ---
 
@@ -101,11 +103,31 @@ typora-pic-cleaner scan ~/Documents/Notes
 
 ## 用法
 
+### 先看看有哪些笔记文件夹
+
+Typora 没有「库」的概念，笔记通常散在好几个文件夹里。先让工具找出来：
+
+```bash
+typora-pic-cleaner discover ~/Documents
+```
+
+```
+/Users/me/Documents  （148 篇笔记，512 张图片）
+  Notes  （120 篇笔记，480 张图片）
+  Work   （26 篇笔记，31 张图片）
+  Blog   （2 篇笔记，1 张图片）
+```
+
+只列出**子树里确实有笔记**的文件夹，并顺带告诉你每个里面有多少东西，方便决定要扫哪几个。
+
 ### 看看有哪些图没人用
 
 ```bash
 typora-pic-cleaner scan ~/Documents/Notes
+typora-pic-cleaner scan ~/Documents/Notes ~/Documents/Work ~/Documents/Blog
 ```
+
+**写几个文件夹就一起比对几个**，不是分别扫一遍：`Work` 里的笔记引用了 `Notes/assets/logo.png`，这张图就算「在用」。分开扫会把它判成没人用——这正是最容易误删的情况。
 
 输出长这样（这里是英文界面；中文系统上会自动显示中文）：
 
@@ -144,6 +166,8 @@ typora-pic-cleaner clean ~/Documents/Notes -y       # 跳过确认（脚本里�
 
 ### 撤销
 
+回收站和清理历史都放在**第一个**笔记文件夹下，所以还原时把它写在前面：
+
 ```bash
 typora-pic-cleaner restore ~/Documents/Notes --list        # 看清理历史
 typora-pic-cleaner restore ~/Documents/Notes               # 还原最近一次
@@ -156,13 +180,25 @@ typora-pic-cleaner restore ~/Documents/Notes --id 20260903-224151
 typora-pic-cleaner gui
 ```
 
-选目录 → Scan → 清单里逐项勾选 → Move selected to trash。误删了点 Undo last clean。
+左边是文件夹清单，右边是扫描结果：
+
+1. 点 **查找文件夹…**，选一个上层目录（比如 `~/Documents`），工具会把里面所有含笔记的文件夹列出来，每行带笔记数和图片数。
+2. **逐个勾选**要扫的。勾上父文件夹时，它下面的子文件夹会自动标成「已含在上级」，不会被重复统计。
+3. 单独的文件夹用 **添加…** 手动加；不想要的选中按 **移除**（或按 Delete 键）。
+4. 图片存在笔记文件夹之外的话，在下面的「图片文件夹」里添加。
+5. 点右下角**扫描**，然后在清单里取消勾选想留下的，最后**把勾选项移到回收站**。误删了点**撤销上次清理**。
+
+**勾选结果会被记住**，下次打开原样恢复；再次「查找文件夹」时，你之前取消勾选过的文件夹**仍然保持不勾**，只有新发现的才默认勾上。文件夹如果被你删掉了，会标成「已不存在」并自动跳过。
+
+外观跟随系统的浅色/深色，也可以在**设置**（菜单栏里也有）里固定成浅色或深色，和语言一样会被记住。双击结果里的某一行可以直接在访达 / 资源管理器里定位那张图。
 
 ---
 
-## 三种图片存放方式都支持
+## 多个文件夹、三种存放方式，都支持
 
-Typora 存图有几种常见布局，工具会自动探测并在报告的 `Layout` 一行告诉你识别结果：
+Typora 存图有几种常见布局，工具会自动探测并在报告的 `Layout` 一行告诉你识别结果。不管哪种布局，做法都是同一件事：**把扫描范围内的所有图片列成一张清单，把所有笔记里的所有引用解析成另一张清单，两张相减**。所以「图片存在哪」不需要你告诉它，只有「笔记在哪」需要。
+
+每条引用都按**引用它的那篇笔记**来定基准，依次尝试：该笔记的 `typora-root-url` → 笔记自己所在目录 → 每个笔记文件夹的根 → 每个 `--images` 目录。任意一个能对上磁盘上的文件就算「被引用」——宁可多对上，多余的候选只会保住文件。
 
 **1. 同名 `.assets` 目录**（Typora 默认）—— 直接扫笔记根目录即可：
 
@@ -179,6 +215,12 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 ```
 
 `--images` 可以重复多次。这些目录只用来找图片，不会在里面找笔记。
+
+**4. 笔记散在好几个互不相干的文件夹里** —— 全部写上，一次扫完：
+
+```bash
+typora-pic-cleaner scan ~/Documents/Notes ~/Work/wiki ~/Desktop/临时笔记
+```
 
 ---
 
@@ -214,6 +256,7 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 |---|---|
 | `--lang zh` / `--lang en` | 界面语言，默认跟随系统 |
 | `--images DIR` | 额外的图片目录，可重复 |
+| `--depth N` | `discover` 向下列几层（默认 3） |
 | `--paranoid` | 正文里**光是提到**某个文件名也算引用。保留得更多、删得更少，不确定时用它 |
 | `--ext .psd` | 把额外的扩展名也当图片，可重复 |
 | `--limit 0` | 列出全部（默认每节最多 50 行） |
@@ -225,6 +268,8 @@ typora-pic-cleaner scan ~/Documents/Notes --images ~/Pictures/TyporaImages
 ---
 
 ## 开发
+
+分层是：`paths`/`refs` 认引用，`scanner`/`discovery` 找文件，`compare` 做减法，`actions` 负责可撤销的移动，`palette`/`theme`/`folderlist`/`gui` 只管界面。界面里的判断（哪些文件夹要扫、谁被谁包含、勾选怎么记）全在 `discovery.FolderSet` 里，不依赖 Tk，因此能在没有图形界面的 CI 上直接测。
 
 测试只用标准库，直接跑：
 

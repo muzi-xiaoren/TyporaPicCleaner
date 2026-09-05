@@ -94,15 +94,21 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          mkdir -p fixture/img
-          printf '![](img/used.png)\n' > fixture/note.md
-          printf 'x' > fixture/img/used.png
-          printf 'x' > fixture/img/dead.png
+          mkdir -p fixture/notes/img fixture/other
+          printf '![](img/used.png)\n' > fixture/notes/note.md
+          printf '![](../notes/img/shared.png)\n' > fixture/other/note.md
+          printf 'x' > fixture/notes/img/used.png
+          printf 'x' > fixture/notes/img/shared.png
+          printf 'x' > fixture/notes/img/dead.png
           unzip -q "out/typora-pic-cleaner-cli-macos-${{ matrix.arch }}.zip" -d unpacked
           test -x unpacked/typora-pic-cleaner || { echo "execute bit lost in the archive"; exit 1; }
           ./unpacked/typora-pic-cleaner --version
-          ./unpacked/typora-pic-cleaner scan fixture --json > result.json
-          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;assert d['referenced']==1,d;print('packaged CLI analysis OK')"
+          ./unpacked/typora-pic-cleaner scan fixture/notes fixture/other --json > result.json
+          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;assert d['referenced']==2,d;assert len(d['md_roots'])==2,d;print('packaged CLI analysis OK')"
+          # A folder scanned on its own would call shared.png unreferenced;
+          # the packaged build has to compare both folders as one corpus.
+          ./unpacked/typora-pic-cleaner discover fixture --json > found.json
+          python -c "import json;d=json.load(open('found.json'));assert {r['path'].rsplit('/',1)[-1] for r in d if r['depth']}=={'notes','other'},d;print('packaged CLI discovery OK')"
           unzip -q "out/TyporaPicCleaner-macos-${{ matrix.arch }}.zip" -d app
           test -x "app/TyporaPicCleaner.app/Contents/MacOS/TyporaPicCleaner" || { echo "app binary not executable"; exit 1; }
           echo "windowed .app packaged OK"
@@ -110,13 +116,15 @@ jobs:
       - name: Smoke-test the packaged CLI (Windows)
         if: runner.os == 'Windows'
         run: |
-          New-Item -ItemType Directory -Force -Path fixture/img | Out-Null
-          Set-Content -Path fixture/note.md -Value '![](img/used.png)'
-          Set-Content -Path fixture/img/used.png -Value 'x'
-          Set-Content -Path fixture/img/dead.png -Value 'x'
+          New-Item -ItemType Directory -Force -Path fixture/notes/img, fixture/other | Out-Null
+          Set-Content -Path fixture/notes/note.md -Value '![](img/used.png)'
+          Set-Content -Path fixture/other/note.md -Value '![](../notes/img/shared.png)'
+          Set-Content -Path fixture/notes/img/used.png -Value 'x'
+          Set-Content -Path fixture/notes/img/shared.png -Value 'x'
+          Set-Content -Path fixture/notes/img/dead.png -Value 'x'
           ./out/typora-pic-cleaner-cli-windows.exe --version
-          ./out/typora-pic-cleaner-cli-windows.exe scan fixture --json > result.json
-          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;print('packaged CLI analysis OK')"
+          ./out/typora-pic-cleaner-cli-windows.exe scan fixture/notes fixture/other --json > result.json
+          python -c "import json;d=json.load(open('result.json'));assert d['unreferenced_count']==1,d;assert len(d['md_roots'])==2,d;print('packaged CLI analysis OK')"
           # Subsystem 2 == GUI: this is what stops a console window appearing
           # behind the interface, so it is worth asserting rather than assuming.
           python -c "import struct;f=open('out/TyporaPicCleaner-windows.exe','rb');f.seek(60);o=struct.unpack('<I',f.read(4))[0];f.seek(o+24+68);s=struct.unpack('<H',f.read(2))[0];assert s==2,f'subsystem {s}, expected 2 (GUI)';print('windowed exe is a GUI binary OK')"

@@ -6,8 +6,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from .i18n import t
-from .paths import IMAGE_EXTS, has_image_ext
+from .paths import has_image_ext
 
 MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdown", ".mkd", ".mdwn", ".mdtxt"})
 
@@ -43,7 +42,8 @@ class Walk:
     errors: list[str] = field(default_factory=list)
 
 
-def _prune(dirnames: list[str]) -> None:
+def prune_dirnames(dirnames: list[str]) -> None:
+    """Drop, in place, the directories no walk of a vault should descend into."""
     dirnames[:] = [
         d for d in dirnames
         if d not in SKIP_DIRS and d != TRASH_DIRNAME and not d.startswith(".")
@@ -55,7 +55,7 @@ def walk_tree(root: str, extra_exts: frozenset[str] = frozenset(),
     """Inventory *root* in one pass."""
     result = Walk()
     for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: result.errors.append(str(e))):
-        _prune(dirnames)
+        prune_dirnames(dirnames)
         for dirname in dirnames:
             if dirname.lower().endswith(".assets"):
                 result.asset_dirs.append(os.path.join(dirpath, dirname))
@@ -96,7 +96,7 @@ def merge(walks: list[Walk]) -> Walk:
 
 
 def detect_layouts(
-    walk: Walk, image_dirs: Tuple[str, ...], md_root: str
+    walk: Walk, image_dirs: Tuple[str, ...], md_roots: Tuple[str, ...]
 ) -> List[Tuple[str, dict]]:
     """Describe how this vault stores its pictures.
 
@@ -117,7 +117,7 @@ def detect_layouts(
         names = ", ".join(sorted(os.path.basename(p) for p in shared)[:4])
         layouts.append(("layout.shared_folders", {"count": len(shared), "names": names}))
 
-    external = [d for d in image_dirs if not _under(d, md_root)]
+    external = [d for d in image_dirs if not any(_under(d, root) for root in md_roots)]
     if external:
         layouts.append(("layout.global_folder", {"dirs": ", ".join(external)}))
 

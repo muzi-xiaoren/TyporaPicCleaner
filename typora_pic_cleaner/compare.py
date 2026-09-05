@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Sequence, Union
 
-from .paths import PathKeyer, has_image_ext, is_within, resolve_reference
+from .paths import PathKeyer, is_within, resolve_reference
 from .refs import Reference, extract_references, front_matter_root_url
 from .scanner import ImageFile, Walk, detect_layouts, merge, read_text_best_effort, walk_tree
 
@@ -23,7 +24,11 @@ class RefSite:
 
 @dataclass
 class Analysis:
-    md_root: str
+    #: Every notes folder that was scanned.  More than one is the normal case:
+    #: people keep several unrelated Typora folders, and comparing them in a
+    #: single pass is what stops a picture shared between two of them from
+    #: looking unreferenced in each.
+    md_roots: tuple[str, ...]
     image_dirs: tuple[str, ...]
     layouts: list[tuple[str, dict]] = field(default_factory=list)
     md_count: int = 0
@@ -36,44 +41,76 @@ class Analysis:
     errors: list[str] = field(default_factory=list)
 
     @property
+    def md_root(self) -> str:
+        """The folder that anchors the undo history and relative display paths."""
+        return self.md_roots[0]
+
+    @property
+    def roots(self) -> tuple[str, ...]:
+        """Every tree files may be moved out of, for the deletion guard rails."""
+        return self.md_roots + self.image_dirs
+
+    @property
     def reclaimable_bytes(self) -> int:
         return sum(image.size for image in self.unreferenced)
 
 
-def _delete_roots(md_root: str, image_dirs: tuple[str, ...]) -> tuple[str, ...]:
-    return (md_root,) + tuple(d for d in image_dirs if not is_within(d, md_root))
+def _delete_roots(md_roots: tuple[str, ...], image_dirs: tuple[str, ...]) -> tuple[str, ...]:
+    return md_roots + tuple(
+        d for d in image_dirs if not any(is_within(d, root) for root in md_roots)
+    )
+
+
+def _normalise_roots(md_roots: "Union[str, Sequence[str]]") -> tuple[str, ...]:
+    """Accept one folder or many, and drop duplicates while keeping the order.
+
+    The first survivor stays first on purpose: it is where the trash folder and
+    the undo history go, so it must not drift between runs.
+    """
+    if isinstance(md_roots, str):
+        md_roots = [md_roots]
+    seen: dict[str, None] = {}
+    for root in md_roots:
+        seen.setdefault(os.path.abspath(root), None)
+    if not seen:
+        raise ValueError("at least one notes folder is required")
+    return tuple(seen)
 
 
 def analyze(
-    md_root: str,
+    md_roots: "Union[str, Sequence[str]]",
     image_dirs: tuple[str, ...] = (),
     paranoid: bool = False,
     extra_exts: frozenset[str] = frozenset(),
 ) -> Analysis:
     """Compare every image under the given roots against every reference.
 
-    *image_dirs* may point outside *md_root* (Typora's global image folder), in
-    which case those trees are scanned for pictures but not for notes.
+    *md_roots* is one notes folder or several; they are scanned as a single
+    corpus, so a picture in one folder that a note in another links to counts
+    as referenced.  *image_dirs* may point outside all of them (Typora's global
+    image folder), in which case those trees are scanned for pictures but not
+    for notes.
     """
-    md_root = os.path.abspath(md_root)
+    roots = _normalise_roots(md_roots)
     image_dirs = tuple(os.path.abspath(d) for d in image_dirs)
-    keyer = PathKeyer(md_root if os.path.isdir(md_root) else None)
+    existing = [root for root in roots if os.path.isdir(root)]
+    keyer = PathKeyer(existing[0] if existing else None)
 
-    walks = [walk_tree(md_root, extra_exts)]
+    walks = [walk_tree(root, extra_exts) for root in roots]
     for image_dir in image_dirs:
-        if not is_within(image_dir, md_root):
+        if not any(is_within(image_dir, root) for root in roots):
             walks.append(walk_tree(image_dir, extra_exts, collect_markdown=False))
     walk = merge(walks)
 
-    analysis = Analysis(md_root=md_root, image_dirs=image_dirs)
+    analysis = Analysis(md_roots=roots, image_dirs=image_dirs)
     analysis.errors.extend(walk.errors)
     analysis.md_count = len(walk.markdown)
     analysis.total_images = len(walk.images)
-    analysis.layouts = detect_layouts(walk, image_dirs, md_root)
+    analysis.layouts = detect_layouts(walk, image_dirs, roots)
 
     on_disk = {keyer.key(image.path): image for image in walk.images}
-    extra_bases = (md_root,) + image_dirs
-    roots = _delete_roots(md_root, image_dirs)
+    extra_bases = roots + image_dirs
+    delete_roots = _delete_roots(roots, image_dirs)
     hit_keys: set[str] = set()
 
     for md_path in walk.markdown:
@@ -92,12 +129,12 @@ def analyze(
             if matched:
                 hit_keys.update(keyer.key(c) for c in matched)
                 continue
-            existing = [c for c in candidates if os.path.exists(c)]
-            if existing:
+            found = [c for c in candidates if os.path.exists(c)]
+            if found:
                 # The file is real but lives outside the trees we scanned, so we
                 # cannot reason about it -- surface it instead of ignoring it.
-                if not any(is_within(existing[0], root) for root in roots):
-                    analysis.external.append(_site(md_path, ref, existing[0]))
+                if not any(is_within(found[0], root) for root in delete_roots):
+                    analysis.external.append(_site(md_path, ref, found[0]))
                 continue
             analysis.broken.append(_site(md_path, ref, None))
 

@@ -1,8 +1,10 @@
-"""A tiny settings file, currently holding only the interface language.
+"""A tiny settings file: the interface language and the chosen folders.
 
-Worth persisting because the common case is a user whose system is set to one
-language but who wants the tool in another: without this, every launch would
-undo their choice.
+Worth persisting because both are answers the user should only have to give
+once.  The language matters most to someone whose system is set to one language
+but who wants the tool in another; the folder list matters because working out
+which of a dozen directories hold notes -- and which of those you deliberately
+excluded -- is the tedious part of every run.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import List, Tuple
 
 APP_DIRNAME = "typora-pic-cleaner"
 CONFIG_NAME = "config.json"
@@ -70,3 +73,62 @@ def load_language() -> str | None:
 
 def save_language(language: str) -> bool:
     return save(language=language)
+
+
+def load_note_folders() -> List[Tuple[str, bool]]:
+    """The remembered notes folders as ``(path, selected)``, in the saved order.
+
+    Order is preserved because the first folder anchors the undo history; a
+    reshuffle between runs would scatter it across several trash folders.
+    """
+    out: List[Tuple[str, bool]] = []
+    seen = set()
+    for entry in load().get("note_folders") or []:
+        if isinstance(entry, str):
+            path, selected = entry, True
+        elif isinstance(entry, dict) and isinstance(entry.get("path"), str):
+            path, selected = entry["path"], bool(entry.get("selected", True))
+        else:
+            continue
+        key = os.path.normcase(path)
+        if path and key not in seen:
+            seen.add(key)
+            out.append((path, selected))
+    return out
+
+
+def save_note_folders(folders: List[Tuple[str, bool]]) -> bool:
+    return save(
+        note_folders=[{"path": path, "selected": bool(selected)} for path, selected in folders]
+    )
+
+
+def _load_paths(key: str) -> List[str]:
+    values = load().get(key) or []
+    out: List[str] = []
+    seen = set()
+    for value in values:
+        if not isinstance(value, str) or not value:
+            continue
+        folded = os.path.normcase(value)
+        if folded not in seen:
+            seen.add(folded)
+            out.append(value)
+    return out
+
+
+def load_image_folders() -> List[str]:
+    return _load_paths("image_folders")
+
+
+def save_image_folders(folders: List[str]) -> bool:
+    return save(image_folders=list(folders))
+
+
+def load_scan_parents() -> List[str]:
+    """Folders the user has pointed the finder at before, most recent first."""
+    return _load_paths("scan_parents")
+
+
+def save_scan_parents(parents: List[str]) -> bool:
+    return save(scan_parents=list(parents)[:8])

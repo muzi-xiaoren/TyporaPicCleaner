@@ -1,4 +1,5 @@
-"""Command line interface: ``scan`` looks, ``clean`` moves, ``restore`` undoes."""
+"""Command line interface: ``discover`` lists folders, ``scan`` looks,
+``clean`` moves, ``restore`` undoes."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import sys
 from . import __version__
 from .actions import UnsafePath, list_batches, move_to_trash, restore_batch, trash_root_for
 from .compare import analyze
+from .discovery import DEFAULT_MAX_DEPTH, discover
 from .i18n import SUPPORTED, set_language, t
 from .report import human_report, human_size, json_report
 
@@ -35,7 +37,10 @@ def _preselect_language(argv: list[str]) -> None:
 
 
 def _add_scan_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("root", nargs="?", default=".", help=t("cli.help.root"))
+    # Several folders at once, because Typora users rarely keep everything in
+    # one tree -- and scanning them separately would call a picture used by
+    # another folder's note unreferenced.
+    parser.add_argument("root", nargs="*", default=["."], help=t("cli.help.root"))
     parser.add_argument("--images", action="append", metavar="DIR", default=[], help=t("cli.help.images"))
     parser.add_argument("--paranoid", action="store_true", help=t("cli.help.paranoid"))
     parser.add_argument("--ext", action="append", metavar=".EXT", default=[], help=t("cli.help.ext"))
@@ -44,11 +49,12 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _run_analysis(args: argparse.Namespace):
-    root = os.path.abspath(args.root)
-    if not os.path.isdir(root):
-        raise UnsafePath(t("cli.error.not_a_directory", path=root))
+    roots = [os.path.abspath(root) for root in (args.root or ["."])]
+    for root in roots:
+        if not os.path.isdir(root):
+            raise UnsafePath(t("cli.error.not_a_directory", path=root))
     return analyze(
-        root,
+        roots,
         image_dirs=tuple(args.images),
         paranoid=args.paranoid,
         extra_exts=_normalise_exts(args.ext),
@@ -98,10 +104,9 @@ def cmd_clean(args: argparse.Namespace) -> int:
         sys.stdout.write(t("cli.clean.declined") + "\n")
         return 1
 
-    roots = (analysis.md_root,) + analysis.image_dirs
     batch = move_to_trash(
         [image.path for image in analysis.unreferenced],
-        roots=roots,
+        roots=analysis.roots,
         md_root=analysis.md_root,
         system_trash=args.trash_system,
         extra_exts=_normalise_exts(args.ext),
@@ -154,10 +159,45 @@ def cmd_restore(args: argparse.Namespace) -> int:
     return 1 if result.failures else 0
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    parent = os.path.abspath(args.parent)
+    if not os.path.isdir(parent):
+        raise UnsafePath(t("cli.error.not_a_directory", path=parent))
+    found = discover(parent, max_depth=args.depth)
+    if args.json:
+        json.dump(
+            [
+                {
+                    "path": c.path, "depth": c.depth, "notes": c.notes,
+                    "images": c.images, "own_notes": c.own_notes,
+                }
+                for c in found
+            ],
+            sys.stdout, ensure_ascii=False, indent=2,
+        )
+        sys.stdout.write("\n")
+        return 0
+    if not found:
+        sys.stdout.write(t("cli.discover.none", path=parent) + "\n")
+        return 0
+    for candidate in found:
+        label = candidate.path if candidate.depth == 0 else candidate.name
+        sys.stdout.write(
+            "  " * candidate.depth
+            + label
+            + "  "
+            + t("cli.discover.counts", notes=candidate.notes, images=candidate.images)
+            + "\n"
+        )
+    sys.stdout.write("\n" + t("cli.discover.footer") + "\n")
+    return 0
+
+
 def cmd_gui(args: argparse.Namespace) -> int:
     from .gui import main as gui_main
 
-    return gui_main(initial_root=os.path.abspath(args.root) if args.root != "." else "")
+    roots = [os.path.abspath(root) for root in args.root if root != "."]
+    return gui_main(initial_roots=roots)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -188,8 +228,14 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--dry-run", action="store_true", help=t("cli.help.dry_run"))
     restore.set_defaults(func=cmd_restore)
 
+    found = subparsers.add_parser("discover", help=t("cli.help.discover"))
+    found.add_argument("parent", nargs="?", default=".", help=t("cli.help.discover_parent"))
+    found.add_argument("--depth", type=int, default=DEFAULT_MAX_DEPTH, help=t("cli.help.depth"))
+    found.add_argument("--json", action="store_true", help=t("cli.help.json"))
+    found.set_defaults(func=cmd_discover)
+
     gui = subparsers.add_parser("gui", help=t("cli.help.gui"))
-    gui.add_argument("root", nargs="?", default=".", help=t("cli.help.gui_root"))
+    gui.add_argument("root", nargs="*", default=[], help=t("cli.help.gui_root"))
     gui.set_defaults(func=cmd_gui)
     return parser
 

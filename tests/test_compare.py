@@ -197,3 +197,65 @@ class LayoutDetectionTests(VaultTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeveralNotesFoldersTests(VaultTestCase):
+    """Scanning folders together, which is what stops a shared picture dying."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write("work/note.md", "![](../shared/logo.png)\n")
+        self.write("home/diary.md", "# nothing linked\n")
+        self.image("shared/logo.png")
+        self.image("shared/nobody.png")
+
+    def test_a_picture_one_folder_links_survives_a_scan_of_both(self):
+        analysis = analyze([self.path("work"), self.path("shared")])
+        self.assertSameFiles(
+            [image.path for image in analysis.unreferenced], ["shared/nobody.png"]
+        )
+
+    def test_scanning_the_image_folder_alone_would_have_condemned_it(self):
+        # The regression this feature exists for: on its own, ``shared`` has no
+        # note pointing at ``logo.png``, so the old single-folder scan called it
+        # unreferenced and offered to delete a picture that is in use.
+        analysis = analyze(self.path("shared"))
+        self.assertSameFiles(
+            [image.path for image in analysis.unreferenced],
+            ["shared/logo.png", "shared/nobody.png"],
+        )
+
+    def test_notes_from_every_folder_are_counted_once(self):
+        analysis = analyze([self.path("work"), self.path("home"), self.path("shared")])
+        self.assertEqual(analysis.md_count, 2)
+        self.assertEqual(analysis.total_images, 2)
+
+    def test_repeating_a_folder_does_not_double_count_it(self):
+        analysis = analyze([self.path("work"), self.path("work")])
+        self.assertEqual(analysis.md_roots, (self.path("work"),))
+        self.assertEqual(analysis.md_count, 1)
+
+    def test_overlapping_folders_inventory_each_file_once(self):
+        analysis = analyze([self.vault, self.path("shared")])
+        self.assertEqual(analysis.total_images, 2)
+        self.assertEqual(analysis.md_count, 2)
+
+    def test_the_first_folder_anchors_the_undo_history(self):
+        analysis = analyze([self.path("home"), self.path("work")])
+        self.assertEqual(analysis.md_root, self.path("home"))
+
+    def test_roots_covers_every_tree_files_may_leave(self):
+        analysis = analyze([self.path("work")], image_dirs=(self.path("shared"),))
+        self.assertEqual(analysis.roots, (self.path("work"), self.path("shared")))
+
+    def test_a_string_is_still_accepted_as_one_folder(self):
+        self.assertEqual(analyze(self.path("work")).md_roots, (self.path("work"),))
+
+    def test_no_folders_at_all_is_a_programming_error(self):
+        with self.assertRaises(ValueError):
+            analyze([])
+
+    def test_a_link_into_an_unlisted_folder_is_reported_not_assumed(self):
+        analysis = analyze([self.path("work")])
+        self.assertEqual(len(analysis.external), 1)
+        self.assertEqual(analysis.external[0].resolved, self.path("shared/logo.png"))

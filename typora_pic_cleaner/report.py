@@ -28,19 +28,42 @@ def _rel(path: str, root: str) -> str:
     return path if relative.startswith(os.pardir) else relative
 
 
+def display_path(path: str, roots: tuple, extra: tuple = ()) -> str:
+    """Shorten *path* against whichever scanned root actually contains it.
+
+    With several notes folders in play a bare relative path is ambiguous -- two
+    of them may both hold ``img/cover.png`` -- so the folder's own name is kept
+    as the first segment to tell them apart.  One notes folder behaves as it
+    always did.  *extra* holds the image folders, which are always named because
+    they sit outside the notes tree entirely.
+    """
+    for root in sorted(roots, key=len, reverse=True):
+        relative = _rel(path, root)
+        if relative != path:
+            if len(roots) == 1:
+                return relative
+            return os.path.join(os.path.basename(root) or root, relative)
+    for root in sorted(extra, key=len, reverse=True):
+        relative = _rel(path, root)
+        if relative != path:
+            return os.path.join(os.path.basename(root) or root, relative)
+    return path
+
+
 def human_report(
     analysis: Analysis,
     limit: int = 50,
     show_broken: bool = True,
     show_external: bool = True,
 ) -> str:
-    root = analysis.md_root
+    roots = analysis.md_roots
     lines: list[str] = []
     # The label column is padded to the widest translated label so the values
     # still line up in Chinese, where labels are shorter but wider on screen.
     labels = [t("report.notes_root"), t("report.image_dir"), t("report.layout"), t("report.scanned")]
     width = max(len(label) for label in labels)
-    lines.append(f"{t('report.notes_root'):<{width}} : {root}")
+    for root in roots:
+        lines.append(f"{t('report.notes_root'):<{width}} : {root}")
     for image_dir in analysis.image_dirs:
         lines.append(f"{t('report.image_dir'):<{width}} : {image_dir}")
     lines.append(
@@ -70,7 +93,7 @@ def human_report(
         )
         size_width = max(len(human_size(image.size)) for image in shown)
         for image in shown:
-            lines.append(f"  {human_size(image.size):>{size_width}}  {_rel(image.path, root)}")
+            lines.append(f"  {human_size(image.size):>{size_width}}  {display_path(image.path, roots, analysis.image_dirs)}")
         if limit and len(analysis.unreferenced) > limit:
             lines.append("  " + t("report.more_with_hint", count=len(analysis.unreferenced) - limit))
     else:
@@ -80,13 +103,13 @@ def human_report(
     if analysis.orphan_asset_dirs:
         lines.append(t("report.orphans.header", count=len(analysis.orphan_asset_dirs)))
         for path in analysis.orphan_asset_dirs:
-            lines.append(f"  {_rel(path, root)}")
+            lines.append(f"  {display_path(path, roots, analysis.image_dirs)}")
         lines.append("")
 
     if show_broken and analysis.broken:
         lines.append(t("report.broken.header", count=len(analysis.broken)))
         for site in analysis.broken[:limit] if limit else analysis.broken:
-            lines.append(f"  {_rel(site.md, root)}:{site.line}  [{site.kind}]  {site.raw}")
+            lines.append(f"  {display_path(site.md, roots)}:{site.line}  [{site.kind}]  {site.raw}")
         if limit and len(analysis.broken) > limit:
             lines.append("  " + t("report.more", count=len(analysis.broken) - limit))
         lines.append("")
@@ -94,7 +117,7 @@ def human_report(
     if show_external and analysis.external:
         lines.append(t("report.external.header", count=len(analysis.external)))
         for site in analysis.external[:limit] if limit else analysis.external:
-            lines.append(f"  {_rel(site.md, root)}:{site.line}  ->  {site.resolved}")
+            lines.append(f"  {display_path(site.md, roots)}:{site.line}  ->  {site.resolved}")
         lines.append("")
 
     if analysis.errors:
@@ -108,6 +131,9 @@ def human_report(
 
 def json_report(analysis: Analysis) -> dict:
     payload = asdict(analysis)
+    # A property, so ``asdict`` skips it -- but scripts written against the
+    # single-folder releases still read it.
+    payload["md_root"] = analysis.md_root
     payload["reclaimable_bytes"] = analysis.reclaimable_bytes
     payload["unreferenced_count"] = len(analysis.unreferenced)
     # Keys stay in the payload for scripts; the rendered sentences are for

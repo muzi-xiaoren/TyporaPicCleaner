@@ -122,3 +122,75 @@ class CleanCommandTests(VaultTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeveralRootsTests(VaultTestCase):
+    def setUp(self):
+        super().setUp()
+        self.write("work/note.md", "![](../shared/logo.png)\n")
+        self.image("shared/logo.png")
+        self.image("shared/nobody.png", 2048)
+
+    def test_one_folder_at_a_time_condemns_a_shared_picture(self):
+        _, out, _ = run(["scan", self.path("shared"), "--json"])
+        self.assertEqual(2, json.loads(out)["unreferenced_count"])
+
+    def test_both_folders_together_spare_it(self):
+        _, out, _ = run(["scan", self.path("work"), self.path("shared"), "--json"])
+        payload = json.loads(out)
+        self.assertEqual(1, payload["unreferenced_count"])
+        self.assertEqual(2, len(payload["md_roots"]))
+
+    def test_json_still_carries_the_single_root_key(self):
+        _, out, _ = run(["scan", self.path("work"), self.path("shared"), "--json"])
+        payload = json.loads(out)
+        self.assertEqual(payload["md_root"], payload["md_roots"][0])
+
+    def test_a_missing_folder_among_several_is_refused(self):
+        code, _, err = run(["scan", self.path("work"), self.path("nope")])
+        self.assertEqual(1, code)
+        self.assertIn("nope", err)
+
+    def test_clean_moves_files_out_of_every_listed_folder(self):
+        code, _, _ = run(["clean", self.path("work"), self.path("shared"), "-y"])
+        self.assertEqual(0, code)
+        self.assertFalse(os.path.exists(self.path("shared/nobody.png")))
+        self.assertTrue(os.path.exists(self.path("shared/logo.png")))
+
+    def test_undo_looks_under_the_first_folder_given(self):
+        run(["clean", self.path("work"), self.path("shared"), "-y"])
+        code, out, _ = run(["restore", self.path("work")])
+        self.assertEqual(0, code)
+        self.assertTrue(os.path.exists(self.path("shared/nobody.png")))
+
+
+class DiscoverCommandTests(VaultTestCase):
+    def setUp(self):
+        super().setUp()
+        self.write("journal/day.md", "# day")
+        self.image("journal/day.assets/a.png")
+        self.write("tech/note.md", "# tech")
+        self.image("wallpapers/loose.png")
+
+    def test_lists_the_folders_holding_notes(self):
+        code, out, _ = run(["discover", self.vault])
+        self.assertEqual(0, code)
+        self.assertIn("journal", out)
+        self.assertIn("tech", out)
+        self.assertNotIn("wallpapers", out)
+
+    def test_json_is_machine_readable(self):
+        _, out, _ = run(["discover", self.vault, "--json"])
+        rows = json.loads(out)
+        self.assertEqual({os.path.basename(r["path"]) for r in rows if r["depth"]},
+                         {"journal", "tech"})
+        journal = next(r for r in rows if r["path"].endswith("journal"))
+        self.assertEqual((journal["notes"], journal["images"]), (1, 1))
+
+    def test_depth_zero_reports_only_the_folder_itself(self):
+        _, out, _ = run(["discover", self.vault, "--depth", "0", "--json"])
+        self.assertEqual(1, len(json.loads(out)))
+
+    def test_a_folder_with_no_notes_says_so(self):
+        _, out, _ = run(["discover", self.path("wallpapers")])
+        self.assertIn("contains notes", out)
