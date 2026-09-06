@@ -62,7 +62,9 @@ class DiscoverTests(VaultTestCase):
 
     def test_summarise_counts_a_hand_added_folder(self):
         self.assertEqual(summarise(self.path("tech")), (1, 2))
-        self.assertEqual(summarise(self.path("wallpapers")), (0, 0))
+        # No notes, but the pictures still have to be reported: this is exactly
+        # what the image-folder list is for.
+        self.assertEqual(summarise(self.path("wallpapers")), (0, 1))
 
 
 class PathHelperTests(VaultTestCase):
@@ -174,3 +176,62 @@ class NestingTests(VaultTestCase):
         folders = FolderSet([Folder(self.path("vault"))])
         folders.add(Folder(self.path("vault/extra")))
         self.assertEqual(folders.parent_of(self.path("vault/extra")), key_for(self.path("vault")))
+
+
+class NoiseFilterTests(VaultTestCase):
+    """A search of a whole drive has to come back with a readable answer."""
+
+    def names(self, parent=None):
+        return {os.path.relpath(c.path, parent or self.vault) for c in discover(parent or self.vault)}
+
+    def test_software_trees_are_never_offered(self):
+        self.write("Notes/diary.md", "# mine")
+        for junk in ("anaconda3/Lib/site-packages/pkg", "Program Files/app",
+                     "$RECYCLE.BIN/x", "AppData/Roaming/app", "Library/thing"):
+            self.write(junk + "/notes.md", "# not mine")
+        self.assertEqual(self.names(), {os.curdir, "Notes"})
+
+    def test_a_folder_of_packaged_documentation_is_left_out(self):
+        self.write("Notes/diary.md", "# mine")
+        self.write("somelib/README.md", "# lib")
+        self.write("somelib/CHANGELOG.md", "# lib")
+        self.write("somelib/LICENSE.md", "# lib")
+        self.assertEqual(self.names(), {os.curdir, "Notes"})
+
+    def test_one_real_note_is_enough_to_keep_a_folder(self):
+        self.write("project/README.md", "# lib")
+        self.write("project/设计稿.md", "# mine")
+        self.assertIn("project", self.names())
+
+    def test_boilerplate_is_not_credited_to_the_parents_count(self):
+        self.write("Notes/diary.md", "# mine")
+        for index in range(20):
+            self.write("lib%d/README.md" % index, "# lib")
+        root = next(c for c in discover(self.vault) if c.depth == 0)
+        self.assertEqual(root.notes, 1)
+        self.assertEqual(root.skipped_notes, 20)
+
+    def test_names_a_person_might_really_use_are_not_boilerplate(self):
+        for name in ("todo", "index", "notes", "history"):
+            with self.subTest(name=name):
+                self.write("f_%s/%s.md" % (name, name), "# mine")
+        self.assertEqual(
+            self.names() - {os.curdir},
+            {"f_todo", "f_index", "f_notes", "f_history"},
+        )
+
+    def test_an_explicitly_named_software_folder_is_still_counted_in_full(self):
+        """The filter guides the search; it never overrules a direct request.
+
+        The row's number has to match what a scan of it would see, or the user
+        is looking at two different truths.
+        """
+        self.write("anaconda3/pkg/README.md", "# lib")
+        self.image("anaconda3/pkg/logo.png")
+        self.assertEqual(summarise(self.path("anaconda3/pkg")), (1, 1))
+
+    def test_an_image_only_folder_reports_its_pictures(self):
+        """The usual case for the image-folder list, which holds no notes."""
+        self.image("图库/a.png")
+        self.image("图库/b.png")
+        self.assertEqual(summarise(self.path("图库")), (0, 2))

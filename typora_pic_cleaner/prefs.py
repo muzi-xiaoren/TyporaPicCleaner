@@ -132,3 +132,17 @@ def load_scan_parents() -> List[str]:
 
 def save_scan_parents(parents: List[str]) -> bool:
     return save(scan_parents=list(parents)[:8])
+
+
+def load_pixel(name: str, fallback: int, low: int = 60, high: int = 4000) -> int:
+    """A remembered pixel position, or *fallback* if it is missing or absurd.
+
+    Bounded because the settings file outlives the screen it was written on: a
+    sash remembered at 1800 on an external monitor would hide the whole content
+    column on a laptop.
+    """
+    try:
+        number = int(load().get(name))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return fallback
+    return number if low <= number <= high else fallback

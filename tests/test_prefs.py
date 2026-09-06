@@ -120,3 +120,23 @@ class RememberedFoldersTests(ConfigIsolationMixin):
         prefs.save_language("zh")
         prefs.save_note_folders([("/notes", True)])
         self.assertEqual("zh", prefs.load_language())
+
+
+class PixelTests(ConfigIsolationMixin):
+    def setUp(self):
+        self.directory = self.isolate_config()
+
+    def test_a_saved_position_comes_back(self):
+        prefs.save(sash_main=412)
+        self.assertEqual(412, prefs.load_pixel("sash_main", 320))
+
+    def test_an_absent_one_falls_back(self):
+        self.assertEqual(320, prefs.load_pixel("sash_main", 320))
+
+    def test_a_position_from_a_bigger_screen_is_not_trusted(self):
+        prefs.save(sash_main=9000)
+        self.assertEqual(320, prefs.load_pixel("sash_main", 320))
+
+    def test_junk_falls_back_instead_of_raising(self):
+        prefs.save(sash_main="wide")
+        self.assertEqual(320, prefs.load_pixel("sash_main", 320))

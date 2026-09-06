@@ -170,6 +170,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
                 {
                     "path": c.path, "depth": c.depth, "notes": c.notes,
                     "images": c.images, "own_notes": c.own_notes,
+                    "skipped_notes": c.skipped_notes,
                 }
                 for c in found
             ],
@@ -189,6 +190,9 @@ def cmd_discover(args: argparse.Namespace) -> int:
             + t("cli.discover.counts", notes=candidate.notes, images=candidate.images)
             + "\n"
         )
+    hidden = max((c.skipped_notes for c in found), default=0)
+    if hidden:
+        sys.stdout.write("\n" + t("cli.discover.skipped", count=hidden) + "\n")
     sys.stdout.write("\n" + t("cli.discover.footer") + "\n")
     return 0
 

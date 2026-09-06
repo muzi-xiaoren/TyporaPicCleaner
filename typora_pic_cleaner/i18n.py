@@ -72,6 +72,7 @@ EN: dict[str, str] = {
     "cli.discover.none": "No folder under {path} contains notes.",
     "cli.discover.counts": "({notes} notes, {images} images)",
     "cli.discover.footer": "Pass any of these to scan/clean -- several at once are compared as one corpus.",
+    "cli.discover.skipped": "{count} Markdown file(s) were left out for looking like documentation that came with some software. Name a folder directly to scan it anyway.",
     "cli.scan.footer": (
         "Nothing has been deleted. Review the list above, then run the same command "
         "with 'clean' to move these files to the trash."
@@ -145,6 +146,7 @@ EN: dict[str, str] = {
         "Move {count} file(s) ({size}) to:\n{destination}\n\n"
         "Nothing is erased -- use \"Undo last clean\" to put them back."
     ),
+    "gui.confirm.move_body_system": "Move {count} file(s) ({size}) to:\n{destination}\n\n\"Undo last clean\" cannot bring these back -- you would restore them from the system trash yourself. Untick \"Use system trash\" if you want the undo button to work.",
     "gui.confirm.undo_title": "Undo last clean?",
     "gui.confirm.undo_body": "Put back {count} file(s) from batch {batch} ({created})?",
     "gui.info.moved": "Moved {count} file(s), {size}.",
@@ -176,8 +178,8 @@ EN: dict[str, str] = {
     "gui.menu.appearance.dark": "Dark",
     "gui.pick_parent_title": "Choose a folder to search for notes folders in",
     "gui.status.finding": "Looking through {path}\u2026",
-    "gui.status.found": "Found {count} folder(s), {added} new. Untick any you do not want scanned.",
-    "gui.status.found_none": "No folder in there contains notes. Try the folder one level up.",
+    "gui.status.found": "Found {count} folder(s), {added} new. Nothing is scanned until you tick it.",
+    "gui.status.found_none": "Nothing in there looks like a notes folder. Try one level up, or add the folder by hand.",
     "gui.empty.no_folders": "Tick at least one notes folder on the left.",
     "gui.empty.not_scanned": "Press Scan to see which pictures nothing points at.",
     "gui.empty.nothing_found": "Nothing unreferenced \u2014 every picture is in use.",
@@ -238,6 +240,7 @@ ZH: dict[str, str] = {
     "cli.discover.none": "{path} 下面没有含笔记的文件夹。",
     "cli.discover.counts": "（{notes} 篇笔记，{images} 张图片）",
     "cli.discover.footer": "把其中任意几个传给 scan/clean 即可；多个文件夹会作为一个整体一起比对。",
+    "cli.discover.skipped": "\u53e6\u6709 {count} \u4e2a Markdown \u770b\u8d77\u6765\u662f\u8f6f\u4ef6\u81ea\u5e26\u7684\u6587\u6863\uff0c\u5df2\u4e0d\u8ba1\u5165\u3002\u60f3\u626b\u7684\u8bdd\u76f4\u63a5\u628a\u90a3\u4e2a\u76ee\u5f55\u5199\u6210\u53c2\u6570\u5373\u53ef\u3002",
     "cli.scan.footer": (
         "没有删除任何文件。请先人工过一遍上面的清单，确认无误后把命令换成 "
         "clean，才会把这些文件移到回收站。"
@@ -309,6 +312,7 @@ ZH: dict[str, str] = {
         "把 {count} 个文件（{size}）移动到：\n{destination}\n\n"
         "不会真正删除——点「撤销上次清理」即可放回原位。"
     ),
+    "gui.confirm.move_body_system": "\u628a {count} \u4e2a\u6587\u4ef6\uff08{size}\uff09\u79fb\u52a8\u5230\uff1a\n{destination}\n\n\u8fd9\u79cd\u65b9\u5f0f\u65e0\u6cd5\u7528\u300c\u64a4\u9500\u4e0a\u6b21\u6e05\u7406\u300d\u8fd8\u539f\uff0c\u53ea\u80fd\u4f60\u81ea\u5df1\u53bb\u7cfb\u7edf\u56de\u6536\u7ad9\u91cc\u627e\u56de\u3002\u60f3\u8ba9\u64a4\u9500\u6309\u94ae\u80fd\u7528\uff0c\u8bf7\u53d6\u6d88\u52fe\u9009\u300c\u4f7f\u7528\u7cfb\u7edf\u56de\u6536\u7ad9\u300d\u3002",
     "gui.confirm.undo_title": "撤销上次清理？",
     "gui.confirm.undo_body": "把批次 {batch}（{created}）的 {count} 个文件放回原位？",
     "gui.info.moved": "已移动 {count} 个文件，共 {size}。",
@@ -340,8 +344,8 @@ ZH: dict[str, str] = {
     "gui.menu.appearance.dark": "\u6df1\u8272",
     "gui.pick_parent_title": "\u9009\u62e9\u8981\u5728\u5176\u4e2d\u67e5\u627e\u7b14\u8bb0\u6587\u4ef6\u5939\u7684\u76ee\u5f55",
     "gui.status.finding": "\u6b63\u5728\u67e5\u627e {path}\u2026",
-    "gui.status.found": "\u627e\u5230 {count} \u4e2a\u6587\u4ef6\u5939\uff0c\u5176\u4e2d {added} \u4e2a\u662f\u65b0\u7684\u3002\u4e0d\u60f3\u626b\u7684\u53ef\u4ee5\u53d6\u6d88\u52fe\u9009\u3002",
-    "gui.status.found_none": "\u8fd9\u4e2a\u76ee\u5f55\u91cc\u6ca1\u6709\u542b\u7b14\u8bb0\u7684\u6587\u4ef6\u5939\uff0c\u8bd5\u8bd5\u518d\u4e0a\u4e00\u5c42\u3002",
+    "gui.status.found": "\u627e\u5230 {count} \u4e2a\u6587\u4ef6\u5939\uff0c\u5176\u4e2d {added} \u4e2a\u662f\u65b0\u7684\u3002\u52fe\u9009\u4f60\u8981\u626b\u63cf\u7684\u2014\u2014\u6ca1\u52fe\u7684\u4e0d\u4f1a\u88ab\u626b\u3002",
+    "gui.status.found_none": "\u8fd9\u4e2a\u76ee\u5f55\u91cc\u6ca1\u627e\u5230\u50cf\u7b14\u8bb0\u5e93\u7684\u6587\u4ef6\u5939\u3002\u8bd5\u8bd5\u518d\u4e0a\u4e00\u5c42\uff0c\u6216\u8005\u76f4\u63a5\u7528\u300c\u6dfb\u52a0\u2026\u300d\u624b\u52a8\u6307\u5b9a\u3002",
     "gui.empty.no_folders": "\u8bf7\u5148\u5728\u5de6\u4fa7\u52fe\u9009\u81f3\u5c11\u4e00\u4e2a\u7b14\u8bb0\u6587\u4ef6\u5939\u3002",
     "gui.empty.not_scanned": "\u70b9\u53f3\u4e0b\u89d2\u7684\u626b\u63cf\uff0c\u770b\u770b\u54ea\u4e9b\u56fe\u7247\u5df2\u7ecf\u6ca1\u4eba\u5f15\u7528\u3002",
     "gui.empty.nothing_found": "\u6ca1\u6709\u672a\u88ab\u5f15\u7528\u7684\u56fe\u7247\uff0c\u5168\u90fd\u5728\u7528\u3002",

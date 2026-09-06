@@ -44,6 +44,10 @@ class App:
         self.results: "queue.Queue[tuple]" = queue.Queue()
         self.rows: List[dict] = []
         self.busy = False
+        #: Labels whose text has to re-flow when a sash moves.
+        self._wrapping: List[tuple] = []
+        self._sash_main = prefs.load_pixel("sash_main", SIDEBAR_WIDTH)
+        self._sash_side = prefs.load_pixel("sash_side", 320)
 
         self.appearance = prefs.load().get("appearance") or "auto"
         self.theme = Theme(root, self.appearance)
@@ -98,7 +102,11 @@ class App:
         self._capture()
         prefs.save_note_folders([(f.path, f.selected) for f in self.notes_folders])
         prefs.save_image_folders([f.path for f in self.image_folders if f.selected])
-        prefs.save(paranoid=bool(self.paranoid.get()), appearance=self.appearance)
+        positions = self._sash_positions()
+        self._sash_main = positions.get("sash_main", self._sash_main)
+        self._sash_side = positions.get("sash_sidebar", self._sash_side)
+        prefs.save(paranoid=bool(self.paranoid.get()), appearance=self.appearance,
+                   sash_main=self._sash_main, sash_side=self._sash_side)
 
     def _on_close(self) -> None:
         self._persist()
@@ -112,6 +120,7 @@ class App:
         # copy per switch.
         for child in list(self.root.winfo_children()):
             child.destroy()
+        self._wrapping = []
         self.root.configure(background=self.theme.color("bg"))
         self._build_menubar()
         self._build_header()
@@ -179,25 +188,52 @@ class App:
     # body -----------------------------------------------------------------
 
     def _build_body(self) -> None:
-        body = ttk.Frame(self.root, style="TFrame")
+        # Panes rather than a fixed split: a folder list showing
+        # ``E:\\...\\anaconda3\\envs`` needs more width than one showing
+        # ``~/Notes``, and only the person looking at it knows which they have.
+        body = ttk.PanedWindow(self.root, orient="horizontal")
         body.pack(fill="both", expand=True)
-        self._build_sidebar(body)
-        ttk.Frame(body, style="Rule.TFrame", width=1).pack(side="left", fill="y")
-        self._build_content(body)
+        body.add(self._build_sidebar(body), weight=0)
+        body.add(self._build_content(body), weight=1)
+        self.body = body
+        self.root.after(80, self._restore_sashes)
 
-    def _build_sidebar(self, parent: tk.Misc) -> None:
+    def _restore_sashes(self) -> None:
+        for panes, position in ((self.body, self._sash_main),
+                                (self.sidebar_panes, self._sash_side)):
+            try:
+                panes.sashpos(0, position)
+            except tk.TclError:  # not laid out yet, or a single pane
+                pass
+
+    def _sash_positions(self) -> dict:
+        """Where the dividers are, ignoring the zero an unmapped pane reports."""
+        found = {}
+        for name, panes in (("sash_main", getattr(self, "body", None)),
+                            ("sash_sidebar", getattr(self, "sidebar_panes", None))):
+            if panes is None:
+                continue
+            try:
+                position = int(panes.sashpos(0))
+            except (tk.TclError, ValueError):
+                continue
+            if position > 60:
+                found[name] = position
+        return found
+
+    def _build_sidebar(self, parent: tk.Misc) -> ttk.Frame:
         side = ttk.Frame(parent, style="Sidebar.TFrame", width=SIDEBAR_WIDTH,
                          padding=(PAD, PAD, PAD, PAD))
-        side.pack(side="left", fill="y")
-        side.pack_propagate(False)
-
-        # Packed before the top block so it claims its height first.  The other
-        # way round, the notes list expands into the whole sidebar and pushes
-        # the options off the bottom, where nothing tells the user they exist.
-        lower = ttk.Frame(side, style="Sidebar.TFrame")
-        lower.pack(side="bottom", fill="x")
-        upper = ttk.Frame(side, style="Sidebar.TFrame")
-        upper.pack(side="top", fill="both", expand=True)
+        # A second sash inside the sidebar, so someone with a deep folder tree
+        # can trade the image list's height for it.
+        panes = ttk.PanedWindow(side, orient="vertical")
+        panes.pack(fill="both", expand=True)
+        upper = ttk.Frame(panes, style="Sidebar.TFrame")
+        lower = ttk.Frame(panes, style="Sidebar.TFrame")
+        panes.add(upper, weight=1)
+        panes.add(lower, weight=0)
+        self.sidebar_panes = panes
+        side.bind("<Configure>", lambda _event: self._rewrap())
 
         self._section(upper, t("gui.section.notes"))
         self.notes_list = FolderList(upper, self.theme, on_change=self._folders_changed, height=6)
@@ -225,10 +261,20 @@ class App:
                         style="Sidebar.TCheckbutton").pack(anchor="w")
         ttk.Checkbutton(lower, text=t("gui.use_system_trash"), variable=self.system_trash,
                         style="Sidebar.TCheckbutton").pack(anchor="w", pady=(4, 0))
+        return side
 
     def _hint(self, parent: tk.Misc, text: str) -> None:
-        ttk.Label(parent, text=text, style="SidebarMuted.TLabel",
-                  wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left").pack(anchor="w", pady=(6, 0))
+        label = ttk.Label(parent, text=text, style="SidebarMuted.TLabel",
+                          wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left")
+        label.pack(anchor="w", pady=(6, 0))
+        self._wrapping.append((label, parent, PAD * 2 + 10))
+
+    def _rewrap(self) -> None:
+        """Re-flow the explanatory text when a sash moves."""
+        for label, container, inset in self._wrapping:
+            width = container.winfo_width() - inset
+            if width > 90:
+                label.configure(wraplength=width)
 
     def _section(self, parent: tk.Misc, text: str, top: int = 0) -> None:
         ttk.Label(parent, text=text.upper() if text.isascii() else text,
@@ -242,9 +288,8 @@ class App:
                                    background="sidebar", padding=10)
             button.pack(side="left", padx=(0 if index == 0 else 6, 0))
 
-    def _build_content(self, parent: tk.Misc) -> None:
+    def _build_content(self, parent: tk.Misc) -> ttk.Frame:
         content = ttk.Frame(parent, style="TFrame", padding=(PAD + 4, PAD, PAD + 4, 0))
-        content.pack(side="left", fill="both", expand=True)
         self._build_stats(content)
 
         toolbar = ttk.Frame(content, style="TFrame")
@@ -278,6 +323,7 @@ class App:
         self.tree.bind("<Double-1>", self._reveal_selected)
 
         self.empty = ttk.Label(table, text="", style="Faint.TLabel", justify="center")
+        return content
 
     def _build_stats(self, parent: tk.Misc) -> None:
         card = ttk.Frame(parent, style="Card.TFrame", padding=(PAD, 14))
@@ -312,8 +358,13 @@ class App:
         # The one failure mode a careful list cannot rule out: notes that link
         # these pictures but live in no folder on the list.  It sits by the
         # button that does the moving, where it is read last.
-        ttk.Label(text, text=t("gui.caution"), style="Warn.TLabel",
-                  wraplength=560, justify="left").pack(anchor="w", pady=(2, 0))
+        caution = ttk.Label(text, text=t("gui.caution"), style="Warn.TLabel",
+                            wraplength=560, justify="left")
+        caution.pack(anchor="w", pady=(2, 0))
+        self._wrapping.append((caution, text, 12))
+        self.status_label.configure(wraplength=560)
+        self._wrapping.append((self.status_label, text, 12))
+        footer.bind("<Configure>", lambda _event: self._rewrap())
 
         self.clean_button = RoundedButton(footer, self.theme, t("gui.move_selected"),
                                           command=self._clean, kind="primary")
@@ -567,12 +618,14 @@ class App:
         chosen = [row for row in self.rows if row["checked"]]
         if not chosen:
             return
-        destination = (t("cli.clean.system_trash") if self.system_trash.get()
+        system = self.system_trash.get()
+        destination = (t("cli.clean.system_trash") if system
                        else trash_root_for(self.analysis.md_root))
         if not messagebox.askyesno(
             t("gui.confirm.move_title"),
-            t("gui.confirm.move_body", count=len(chosen),
-              size=human_size(sum(row["size"] for row in chosen)), destination=destination),
+            t("gui.confirm.move_body_system" if system else "gui.confirm.move_body",
+              count=len(chosen), size=human_size(sum(row["size"] for row in chosen)),
+              destination=destination),
         ):
             return
         try:
@@ -661,7 +714,10 @@ class App:
 
     def _absorb_discovery(self, candidates) -> None:
         found = [
-            Folder(path=c.path, selected=True, notes=c.notes, images=c.images, counted=True)
+            # Unticked on purpose.  A search that ticks everything it finds has
+            # made the choice for the user, and on a whole drive that means
+            # scanning tens of thousands of files nobody asked about.
+            Folder(path=c.path, selected=False, notes=c.notes, images=c.images, counted=True)
             for c in candidates
         ]
         added = self.notes_list.merge(found)

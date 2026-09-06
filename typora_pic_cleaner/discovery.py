@@ -25,6 +25,35 @@ from .scanner import MARKDOWN_EXTS, prune_dirnames
 #: their own row, which keeps the list readable for a deep tree.
 DEFAULT_MAX_DEPTH = 3
 
+#: Trees a search must not wander into.  Their Markdown is documentation that
+#: shipped with some software, not anything the user wrote, and offering them
+#: turns a list of four real folders into a list of forty.  Only the *search*
+#: skips these: a folder added by hand is always honoured, whatever it is
+#: called, because then the user has said so explicitly.
+UNINTERESTING_DIRS = frozenset({
+    # Windows system and recycle trees
+    "$recycle.bin", "$winreagent", "system volume information", "recovery",
+    "appdata", "program files", "program files (x86)", "programdata", "windows",
+    # macOS
+    "library", "applications",
+    # Python and package managers
+    "site-packages", "dist-packages", "__pypackages__", ".tox", "vendor",
+    "anaconda", "anaconda3", "miniconda", "miniconda3", "miniforge3",
+})
+
+#: Note names that come with a package rather than from a person.  A folder
+#: whose Markdown is all called README or CHANGELOG is a source tree, and this
+#: catches the ones no list of directory names could.
+#: Deliberately narrow.  A folder is dropped only when *every* note in it is
+#: on this list, so a name a person might really use -- todo, index, notes --
+#: stays off it: the cost of guessing wrong is a real folder the search never
+#: offers, and the user would have no idea it was missing.
+BOILERPLATE_STEMS = frozenset({
+    "readme", "changelog", "changes", "license", "licence", "copying",
+    "contributing", "code_of_conduct", "security", "authors", "upgrading",
+    "installation",
+})
+
 
 @dataclass
 class Folder:
@@ -61,6 +90,10 @@ class Candidate:
     #: Notes sitting directly in this folder, which is what tells "a real notes
     #: folder" apart from "a parent that merely contains some".
     own_notes: int
+    #: Markdown left out of ``notes`` for looking like packaged documentation,
+    #: kept so the caller can say how much noise was filtered rather than
+    #: silently disagreeing with the user's own file count.
+    skipped_notes: int = 0
 
     @property
     def name(self) -> str:
@@ -237,23 +270,36 @@ def discover(
     max_depth: int = DEFAULT_MAX_DEPTH,
     extra_exts: frozenset = frozenset(),
 ) -> List[Candidate]:
-    """Folders under *parent* whose subtree holds at least one note.
+    """Folders under *parent* whose subtree holds at least one note of the
+    user's own.
 
     Returned parents-first, so the list can be poured straight into a tree view.
+    Software trees and packaged documentation are left out entirely -- see
+    :data:`UNINTERESTING_DIRS` and :data:`BOILERPLATE_STEMS` -- because a search
+    that answers with four hundred rows is no better than no search at all.
     """
     parent = os.path.abspath(parent)
     notes: Dict[str, int] = {}
     images: Dict[str, int] = {}
     own: Dict[str, int] = {}
+    skipped: Dict[str, int] = {}
     visited: List[str] = []
 
     for dirpath, dirnames, filenames in os.walk(parent, onerror=lambda _e: None):
         prune_dirnames(dirnames)
+        dirnames[:] = [d for d in dirnames if d.lower() not in UNINTERESTING_DIRS]
         visited.append(dirpath)
-        note_count = image_count = 0
+        note_count = image_count = boilerplate = 0
         for filename in filenames:
-            if os.path.splitext(filename)[1].lower() in MARKDOWN_EXTS:
-                note_count += 1
+            stem, ext = os.path.splitext(filename)
+            if ext.lower() in MARKDOWN_EXTS:
+                # Counted apart, and never credited upwards: a thousand vendored
+                # READMEs under one folder would otherwise make its row read as
+                # the biggest pile of notes on the disk.
+                if stem.lower() in BOILERPLATE_STEMS:
+                    boilerplate += 1
+                else:
+                    note_count += 1
             elif has_image_ext(filename, extra_exts):
                 image_count += 1
         own[dirpath] = note_count
@@ -263,6 +309,7 @@ def discover(
         while True:
             notes[current] = notes.get(current, 0) + note_count
             images[current] = images.get(current, 0) + image_count
+            skipped[current] = skipped.get(current, 0) + boilerplate
             if _same(current, parent):
                 break
             upwards = os.path.dirname(current)
@@ -283,16 +330,29 @@ def discover(
                 notes=notes.get(dirpath, 0),
                 images=images.get(dirpath, 0),
                 own_notes=own.get(dirpath, 0),
+                skipped_notes=skipped.get(dirpath, 0),
             )
         )
     return found
 
 
 def summarise(path: str, extra_exts: frozenset = frozenset()) -> Tuple[int, int]:
-    """``(notes, images)`` in one folder's subtree -- for hand-added folders,
-    which never went through :func:`discover`."""
-    found = discover(path, max_depth=0, extra_exts=extra_exts)
-    return (found[0].notes, found[0].images) if found else (0, 0)
+    """``(notes, images)`` in one folder's subtree, counted without any filter.
+
+    For a folder the user added by hand.  The search's idea of what is worth
+    offering must not apply here: the number beside the row has to match what a
+    scan of that folder would actually see, and a scan counts every Markdown
+    file it finds.
+    """
+    notes = images = 0
+    for _dirpath, dirnames, filenames in os.walk(path, onerror=lambda _e: None):
+        prune_dirnames(dirnames)
+        for filename in filenames:
+            if os.path.splitext(filename)[1].lower() in MARKDOWN_EXTS:
+                notes += 1
+            elif has_image_ext(filename, extra_exts):
+                images += 1
+    return notes, images
 
 
 def _depth(path: str, parent: str) -> int:

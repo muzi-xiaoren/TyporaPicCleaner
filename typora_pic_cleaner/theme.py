@@ -195,8 +195,12 @@ class Theme:
                         troughcolor=c["track"], borderwidth=0, thickness=3,
                         lightcolor=c["accent"], darkcolor=c["accent"])
         style.configure("TSeparator", background=c["border"])
-        style.configure("TPanedwindow", background=c["border"])
-        style.configure("Sash", sashthickness=1)
+        style.configure("TPanedwindow", background=c["bg"])
+        # A sash you can actually grab: 6px, no grip dimple, the same colour as
+        # the rule it replaces so it reads as a divider until you reach for it.
+        style.configure("Sash", sashthickness=6, gripcount=0, handlesize=0,
+                        background=c["border"], bordercolor=c["border"],
+                        lightcolor=c["border"], darkcolor=c["border"])
 
     def _row_height(self) -> int:
         return max(26, self.fonts["body"].metrics("linespace") + 12)
