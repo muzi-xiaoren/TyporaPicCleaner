@@ -24,7 +24,9 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Dict, List, Optional
 
 from . import prefs
-from .actions import UnsafePath, list_batches, move_to_trash, restore_batch, trash_root_for
+from .actions import (
+    UnsafePath, move_to_trash, newest_restorable, restore_batch, trash_root_for,
+)
 from .compare import Analysis, analyze
 from .discovery import Folder, discover, shorten, summarise
 from .folderlist import FolderList
@@ -129,6 +131,7 @@ class App:
         self._render_status()
         self._render_rows()
         self._render_stats()
+        self._refresh_undo_state()
 
     def _rebuild(self) -> None:
         self._capture()
@@ -376,6 +379,7 @@ class App:
         self.undo_button = RoundedButton(footer, self.theme, t("gui.undo"),
                                          command=self._restore, kind="ghost")
         self.undo_button.pack(side="right", padx=(0, 8))
+        self.undo_button.set_state("disabled")
 
     # ------------------------------------------------------------- appearance
 
@@ -396,6 +400,7 @@ class App:
     def _folders_changed(self) -> None:
         self._persist()
         self._render_status()
+        self._refresh_undo_state()
 
     def _find_folders(self) -> None:
         if self.busy:
@@ -589,6 +594,7 @@ class App:
         ]
         self._render_rows()
         self._render_stats()
+        self._refresh_undo_state()
         self.status_text = self._summary_line(analysis)
         self._render_status()
 
@@ -645,32 +651,36 @@ class App:
         messagebox.showinfo(t("gui.title"), message)
         self._scan()
 
-    def _undo_root(self) -> Optional[str]:
-        """The folder holding the most recent clean-up.
+    def _undoable(self) -> Optional[tuple]:
+        """The newest clean-up that can actually be put back, as ``(root, batch)``.
 
-        Searched across every ticked folder rather than assuming the first: the
-        list can be reordered between runs, and an undo that silently looks in
-        the wrong place is worse than no undo button.
+        Every ticked folder is searched, not just the first: the list can be
+        reordered between launches, and an undo that quietly looks in the wrong
+        place is worse than no undo button.
         """
-        newest, newest_root = None, None
-        for root in self.notes_list.selected_paths():
-            for batch in list_batches(root):
-                created = batch.get("created") or ""
-                if newest is None or created > newest:
-                    newest, newest_root = created, root
-        return newest_root
+        return newest_restorable(self.notes_list.selected_paths())
+
+    def _refresh_undo_state(self) -> None:
+        """Light the undo button only when it has something to undo.
+
+        A button that is always lit and then explains itself in an error dialog
+        is telling the user the same untruth as a confirmation that promises an
+        undo which cannot happen.
+        """
+        if hasattr(self, "undo_button"):
+            self.undo_button.set_state("normal" if self._undoable() else "disabled")
 
     def _restore(self) -> None:
         roots = self.notes_list.selected_paths()
         if not roots:
             messagebox.showerror(t("gui.title"), t("gui.err.pick_cleaned_folder"))
             return
-        root = self._undo_root()
-        if root is None:
+        found = self._undoable()
+        if found is None:
             messagebox.showinfo(t("gui.title"),
                                 t("gui.info.no_history", path=trash_root_for(roots[0])))
             return
-        newest = list_batches(root)[0]
+        root, newest = found
         if not messagebox.askyesno(
             t("gui.confirm.undo_title"),
             t("gui.confirm.undo_body", count=len(newest.get("entries", [])),
@@ -678,7 +688,7 @@ class App:
         ):
             return
         try:
-            result = restore_batch(root)
+            result = restore_batch(root, batch_id=newest.get("batch_id"))
         except UnsafePath as exc:
             messagebox.showerror(t("gui.title"), str(exc))
             return

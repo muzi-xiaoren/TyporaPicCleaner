@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import unittest
+from unittest import mock
 
 from tests.helpers import VaultTestCase
+from typora_pic_cleaner import actions
 from typora_pic_cleaner.actions import (
     MANIFEST_NAME,
     UnsafePath,
     check_safe,
     list_batches,
     move_to_trash,
+    newest_restorable,
     restore_batch,
     trash_root_for,
 )
@@ -177,3 +181,67 @@ class ExternalAnchorTests(VaultTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NewestRestorableTests(VaultTestCase):
+    """What the undo button is allowed to promise."""
+
+    def setUp(self):
+        super().setUp()
+        self.image("img/a.png")
+        self.image("img/b.png")
+
+    def clean(self, name, **kwargs):
+        path = self.image("img/%s.png" % name)
+        return move_to_trash([path], roots=(self.vault,), md_root=self.vault, **kwargs)
+
+    def test_no_history_means_nothing_to_offer(self):
+        self.assertIsNone(newest_restorable([self.vault]))
+
+    def test_an_in_vault_batch_is_offered(self):
+        batch = self.clean("one")
+        found = newest_restorable([self.vault])
+        self.assertIsNotNone(found)
+        self.assertEqual(found[0], self.vault)
+        self.assertEqual(found[1]["batch_id"], batch.batch_id)
+
+    def test_a_system_trash_batch_is_never_offered(self):
+        with mock.patch.object(actions, "_system_trash_fn", lambda: os.remove):
+            self.clean("two", system_trash=True)
+        self.assertIsNone(newest_restorable([self.vault]))
+
+    def test_a_later_system_trash_run_does_not_hide_an_earlier_undo(self):
+        wanted = self.clean("three")
+        with mock.patch.object(actions, "_system_trash_fn", lambda: os.remove):
+            self.clean("four", system_trash=True)
+        found = newest_restorable([self.vault])
+        self.assertIsNotNone(found)
+        self.assertEqual(found[1]["batch_id"], wanted.batch_id)
+
+    def stamp(self, batch, created):
+        """Rewrite a batch's timestamp, so ordering is asserted rather than raced."""
+        path = os.path.join(batch.trash_dir, MANIFEST_NAME)
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        data["created"] = created
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+
+    def test_the_more_recent_clean_is_the_one_offered(self):
+        older, newer = self.clean("five"), self.clean("six")
+        self.stamp(older, "2026-01-01T00:00:00")
+        self.stamp(newer, "2026-02-01T00:00:00")
+        self.assertEqual(newest_restorable([self.vault])[1]["batch_id"], newer.batch_id)
+
+    def test_a_folder_further_down_the_list_is_still_searched(self):
+        """The first folder is not privileged: the list gets reordered."""
+        other = os.path.join(os.path.dirname(self.vault), os.path.basename(self.vault) + "-two")
+        os.makedirs(os.path.join(other, "img"))
+        self.addCleanup(shutil.rmtree, other, ignore_errors=True)
+        picture = os.path.join(other, "img", "seven.png")
+        with open(picture, "wb") as handle:
+            handle.write(b"\x89PNG")
+        batch = move_to_trash([picture], roots=(other,), md_root=other)
+        found = newest_restorable([self.vault, other])
+        self.assertEqual(found[0], other)
+        self.assertEqual(found[1]["batch_id"], batch.batch_id)

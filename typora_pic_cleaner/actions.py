@@ -215,6 +215,27 @@ def list_batches(md_root: str) -> list[dict]:
     return batches
 
 
+def newest_restorable(roots) -> "tuple | None":
+    """The most recent clean-up across *roots* that can still be put back.
+
+    Two kinds of recorded batch cannot: one sent to the system trash, where only
+    the operating system can return the files, and an empty one. Skipping them
+    here is what lets an interface disable its undo button honestly instead of
+    offering it and then failing.
+
+    Returns ``(root, batch)`` or ``None``.
+    """
+    best = None
+    for root in roots:
+        for batch in list_batches(root):
+            if batch.get("system_trash") or not batch.get("entries"):
+                continue
+            created = batch.get("created") or ""
+            if best is None or created > best[0]:
+                best = (created, root, batch)
+    return (best[1], best[2]) if best else None
+
+
 @dataclass
 class RestoreResult:
     restored: list[str] = field(default_factory=list)
