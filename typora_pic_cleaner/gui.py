@@ -62,8 +62,8 @@ class App:
         self.status_text: Optional[str] = None
 
         root.title(t("gui.title"))
-        root.geometry("1080x700")
-        root.minsize(880, 560)
+        root.geometry("1120x760")
+        root.minsize(900, 660)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._build()
         self.root.after(120, self._drain_results)
@@ -191,40 +191,44 @@ class App:
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
 
-        self._section(side, t("gui.section.notes"))
-        self.notes_list = FolderList(side, self.theme, on_change=self._folders_changed, height=9)
+        # Packed before the top block so it claims its height first.  The other
+        # way round, the notes list expands into the whole sidebar and pushes
+        # the options off the bottom, where nothing tells the user they exist.
+        lower = ttk.Frame(side, style="Sidebar.TFrame")
+        lower.pack(side="bottom", fill="x")
+        upper = ttk.Frame(side, style="Sidebar.TFrame")
+        upper.pack(side="top", fill="both", expand=True)
+
+        self._section(upper, t("gui.section.notes"))
+        self.notes_list = FolderList(upper, self.theme, on_change=self._folders_changed, height=6)
         self.notes_list.pack(fill="both", expand=True)
         self.notes_list.set_folders(self.notes_folders)
-        self._button_row(side, (
+        self._button_row(upper, (
             (t("gui.btn.find"), self._find_folders, "primary"),
             (t("gui.btn.add"), self._add_notes_folder, "secondary"),
             (t("gui.btn.remove"), self.notes_list.remove_selected, "ghost"),
         ))
-        ttk.Label(side, text=t("gui.hint.notes"), style="SidebarMuted.TLabel",
-                  wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left").pack(anchor="w", pady=(6, 0))
+        self._hint(upper, t("gui.hint.notes"))
 
-        self._section(side, t("gui.section.images"), top=18)
-        self.image_list = FolderList(side, self.theme, on_change=self._folders_changed, height=4)
+        self._section(lower, t("gui.section.images"), top=18)
+        self.image_list = FolderList(lower, self.theme, on_change=self._folders_changed, height=3)
         self.image_list.pack(fill="x")
         self.image_list.set_folders(self.image_folders)
-        self._button_row(side, (
+        self._button_row(lower, (
             (t("gui.btn.add"), self._add_image_folder, "secondary"),
             (t("gui.btn.remove"), self.image_list.remove_selected, "ghost"),
         ))
-        ttk.Label(side, text=t("gui.hint.images"), style="SidebarMuted.TLabel",
-                  wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left").pack(anchor="w", pady=(6, 0))
+        self._hint(lower, t("gui.hint.images"))
 
-        self._section(side, t("gui.section.options"), top=18)
-        ttk.Checkbutton(side, text=t("gui.cautious"), variable=self.paranoid,
+        self._section(lower, t("gui.section.options"), top=18)
+        ttk.Checkbutton(lower, text=t("gui.cautious"), variable=self.paranoid,
                         style="Sidebar.TCheckbutton").pack(anchor="w")
-        ttk.Checkbutton(side, text=t("gui.use_system_trash"), variable=self.system_trash,
+        ttk.Checkbutton(lower, text=t("gui.use_system_trash"), variable=self.system_trash,
                         style="Sidebar.TCheckbutton").pack(anchor="w", pady=(4, 0))
-        # The one failure mode a careful list cannot rule out: notes that link
-        # these pictures but live in no folder on this list.  It belongs beside
-        # the list, because widening the list is the fix.
-        ttk.Label(side, text=t("gui.caution"), style="SidebarMuted.TLabel",
-                  wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left").pack(
-            anchor="w", side="bottom", pady=(12, 0))
+
+    def _hint(self, parent: tk.Misc, text: str) -> None:
+        ttk.Label(parent, text=text, style="SidebarMuted.TLabel",
+                  wraplength=SIDEBAR_WIDTH - PAD * 2, justify="left").pack(anchor="w", pady=(6, 0))
 
     def _section(self, parent: tk.Misc, text: str, top: int = 0) -> None:
         ttk.Label(parent, text=text.upper() if text.isascii() else text,
@@ -300,9 +304,16 @@ class App:
         ttk.Frame(self.root, style="Rule.TFrame", height=1).pack(fill="x")
         footer = ttk.Frame(self.root, style="TFrame", padding=(PAD + 4, 12))
         footer.pack(fill="x")
-        self.status_label = ttk.Label(footer, text="", style="Muted.TLabel",
+        text = ttk.Frame(footer, style="TFrame")
+        text.pack(side="left", fill="x", expand=True)
+        self.status_label = ttk.Label(text, text="", style="Muted.TLabel",
                                       wraplength=560, justify="left")
-        self.status_label.pack(side="left", fill="x", expand=True)
+        self.status_label.pack(anchor="w")
+        # The one failure mode a careful list cannot rule out: notes that link
+        # these pictures but live in no folder on the list.  It sits by the
+        # button that does the moving, where it is read last.
+        ttk.Label(text, text=t("gui.caution"), style="Warn.TLabel",
+                  wraplength=560, justify="left").pack(anchor="w", pady=(2, 0))
 
         self.clean_button = RoundedButton(footer, self.theme, t("gui.move_selected"),
                                           command=self._clean, kind="primary")

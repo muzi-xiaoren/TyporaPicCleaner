@@ -26,7 +26,9 @@ from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Callable, Dict, Optional
 
-from .palette import CHECKED, DARK, FAMILIES, LIGHT, SIZES, UNCHECKED, detect_mode
+from .palette import (
+    CHECKED, DARK, FAMILIES, LIGHT, SIZES, UNCHECKED, detect_mode, prefers_native_ttk,
+)
 
 __all__ = ["CHECKED", "UNCHECKED", "LIGHT", "DARK", "detect_mode", "Theme", "RoundedButton"]
 
@@ -79,12 +81,20 @@ class Theme:
     # ------------------------------------------------------------------ styles
 
     def apply(self, mode: str = "auto") -> None:
+        self.custom = not prefers_native_ttk(
+            self.root.tk.call("tk", "windowingsystem"),
+            self.root.tk.call("info", "patchlevel"),
+        )
         self.mode = detect_mode() if mode == "auto" else ("dark" if mode == "dark" else "light")
+        # On the native theme ttk paints its own light widgets and ignores ours,
+        # so a dark palette behind them would leave unreadable pairings.
+        if not self.custom:
+            self.mode = "light"
         self.colors = dict(DARK if self.mode == "dark" else LIGHT)
         c = self.colors
         style = self.style
         try:
-            style.theme_use("clam")
+            style.theme_use("clam" if self.custom else style.theme_names()[0])
         except tk.TclError:  # pragma: no cover - clam ships with every Tk we target
             pass
 
@@ -153,17 +163,21 @@ class Theme:
         style.map("Sidebar.Treeview", background=[("selected", c["selection"])])
         # ttk draws a sunken frame around a Treeview by default; the layout is
         # replaced rather than merely recoloured because the border is painted
-        # by the element itself.
-        for layout in ("Treeview", "Sidebar.Treeview"):
-            try:
-                style.layout(layout, [("Treeview.treearea", {"sticky": "nswe"})])
-            except tk.TclError:  # pragma: no cover
-                pass
+        # by the element itself.  Left alone on the native theme, whose own
+        # layouts are the only ones it knows how to draw.
+        if self.custom:
+            for layout in ("Treeview", "Sidebar.Treeview"):
+                try:
+                    style.layout(layout, [("Treeview.treearea", {"sticky": "nswe"})])
+                except tk.TclError:  # pragma: no cover
+                    pass
 
         # An arrowless, trackless scrollbar -- the arrows are the single most
         # dated thing in a default ttk window.
         for orient in ("Vertical", "Horizontal"):
             try:
+                if not self.custom:
+                    raise tk.TclError("native scrollbars keep their own layout")
                 style.layout(
                     f"{orient}.TScrollbar",
                     [(f"{orient}.Scrollbar.trough",

@@ -76,6 +76,26 @@ CHECKED = "☑"      # ballot box with check
 UNCHECKED = "☐"    # ballot box
 
 
+def prefers_native_ttk(windowing: str, patchlevel: str) -> bool:
+    """Whether ttk must be left on the platform's own theme.
+
+    The custom look is built on ttk's ``clam`` theme, because it is the only one
+    that honours the colours it is given.  On the macOS Tk that ships with the
+    system -- 8.5.9, from 2010 -- ``clam`` lays every widget out correctly and
+    then paints none of them, so the window comes up blank.  Better a native
+    window than an empty one; the packaged builds carry Tk 8.6 and are
+    unaffected.
+    """
+    if windowing != "aqua":
+        return False
+    parts = patchlevel.split(".")
+    try:
+        version = (int(parts[0]), int(parts[1]))
+    except (IndexError, ValueError):
+        return True  # unreadable version: assume the cautious answer
+    return version < (8, 6)
+
+
 def detect_mode() -> str:
     """Follow the operating system's light/dark setting, defaulting to light."""
     if sys.platform == "darwin":

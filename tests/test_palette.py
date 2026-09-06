@@ -51,3 +51,22 @@ class PaletteTests(unittest.TestCase):
 
     def test_detect_mode_answers_with_one_of_the_two(self):
         self.assertIn(theme.detect_mode(), ("light", "dark"))
+
+
+class NativeThemeFallbackTests(unittest.TestCase):
+    """Which ttk theme is safe to use, decided from the Tk build alone."""
+
+    def test_the_old_macos_tk_must_keep_its_own_theme(self):
+        self.assertTrue(theme.prefers_native_ttk("aqua", "8.5.9"))
+
+    def test_a_current_macos_tk_can_take_the_custom_one(self):
+        self.assertFalse(theme.prefers_native_ttk("aqua", "8.6.13"))
+        self.assertFalse(theme.prefers_native_ttk("aqua", "9.0.0"))
+
+    def test_windows_and_x11_are_never_affected(self):
+        self.assertFalse(theme.prefers_native_ttk("win32", "8.6.12"))
+        self.assertFalse(theme.prefers_native_ttk("x11", "8.5.9"))
+
+    def test_an_unreadable_version_takes_the_cautious_answer(self):
+        self.assertTrue(theme.prefers_native_ttk("aqua", "unknown"))
+        self.assertTrue(theme.prefers_native_ttk("aqua", "8"))
