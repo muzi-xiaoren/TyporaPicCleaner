@@ -84,11 +84,13 @@ def shorten(path: str, limit: int = 34) -> str:
         return path
     kept = pieces[-1]
     for piece in reversed(pieces[:-1]):
-        candidate = piece + "/" + kept
+        # Rejoined with the platform's own separator: the pieces were split on
+        # both, so a fixed one would hand Windows a mixed path.
+        candidate = piece + os.sep + kept
         if len(candidate) + 2 > limit:
             break
         kept = candidate
-    return "\u2026/" + kept
+    return "\u2026" + os.sep + kept
 
 
 class FolderSet:

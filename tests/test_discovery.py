@@ -134,16 +134,24 @@ class FolderSetTests(VaultTestCase):
 
 class ShortenTests(VaultTestCase):
     def test_a_short_path_is_left_alone(self):
-        self.assertEqual("/notes/work", shorten("/notes/work"))
+        short = os.path.join("notes", "work")
+        self.assertEqual(short, shorten(short))
 
     def test_the_home_prefix_becomes_a_tilde(self):
-        self.assertEqual("~/Notes", shorten(os.path.join(os.path.expanduser("~"), "Notes")))
+        self.assertEqual("~" + os.sep + "Notes",
+                         shorten(os.path.join(os.path.expanduser("~"), "Notes")))
 
     def test_a_long_path_keeps_its_tail(self):
-        shortened = shorten("/a/very/long/chain/of/directories/that/keeps/going/notes")
-        self.assertTrue(shortened.startswith("\u2026/"))
+        shortened = shorten(os.path.join(
+            os.sep, "a", "very", "long", "chain", "of", "directories", "that", "keeps", "notes"))
+        self.assertTrue(shortened.startswith("\u2026" + os.sep))
         self.assertTrue(shortened.endswith("notes"))
         self.assertLessEqual(len(shortened), 34)
+
+    def test_the_result_never_mixes_separators(self):
+        """A sidebar row reading ``...\\Users/me`` looks like a bug to a user."""
+        shortened = shorten(os.path.join(os.sep, "a" * 12, "b" * 12, "c" * 12, "notes"))
+        self.assertNotIn("/" if os.sep == "\\" else "\\", shortened)
 
 
 class NestingTests(VaultTestCase):
