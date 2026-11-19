@@ -74,6 +74,10 @@ class FolderList(ttk.Frame):
         self.refresh()
         return added
 
+    def include(self, folder: Folder) -> None:
+        self.model.include(folder)
+        self.refresh()
+
     def remove_selected(self) -> None:
         if not self.model.remove(list(self.tree.selection())):
             return
@@ -124,6 +128,13 @@ class FolderList(ttk.Frame):
         if item:
             self.model.toggle(item)
             self.refresh()
+            # Returning "break" keeps Tk's own handler from running, and that
+            # handler is what selects the row and takes the keyboard focus.  So
+            # both are done here -- otherwise nothing can ever be selected with
+            # the mouse, and Remove, Delete and Space have nothing to act on.
+            self.tree.selection_set(item)
+            self.tree.focus(item)
+            self.tree.focus_set()
             self._changed()
         return "break"
 

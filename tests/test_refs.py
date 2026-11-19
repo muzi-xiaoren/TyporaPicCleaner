@@ -74,6 +74,29 @@ class ExtractionTests(unittest.TestCase):
     def test_inline_code_is_ignored(self):
         self.assertEqual(set(), raws("use `![](inline.png)` like so"))
 
+    def test_a_longer_fence_is_not_closed_by_a_shorter_one_inside_it(self):
+        # The usual way to show a code block inside a code block.  Closing the
+        # outer one early used to turn its real last line into a new opening
+        # fence, hiding every link in the rest of the note.
+        text = (
+            "````md\n```python\n![](inner.png)\n```\n![](still-inside.png)\n````\n"
+            "\n![](after.png)\n"
+        )
+        self.assertEqual({"after.png"}, raws(text))
+
+    def test_a_longer_run_does_close_a_shorter_fence(self):
+        self.assertEqual({"after.png"}, raws("```\n![](inside.png)\n`````\n![](after.png)\n"))
+
+    def test_backticks_on_one_line_are_a_span_not_an_opening_fence(self):
+        self.assertEqual({"after.png"}, raws("```![](inline.png)```\n\n![](after.png)\n"))
+
+    def test_stray_backticks_do_not_pair_up_across_paragraphs(self):
+        text = "a stray ` here\n\n![](between.png)\n\nand another ` there\n"
+        self.assertEqual({"between.png"}, raws(text))
+
+    def test_an_inline_span_may_still_wrap_within_its_paragraph(self):
+        self.assertEqual({"after.png"}, raws("see `![](in\nside.png)` then ![](after.png)\n"))
+
     def test_line_numbers_survive_masking(self):
         refs = extract_references("```\nx\n```\n\n![](a.png)\n")
         self.assertEqual([5], [ref.line for ref in refs])

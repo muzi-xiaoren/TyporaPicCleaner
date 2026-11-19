@@ -14,6 +14,7 @@ import locale
 import os
 import subprocess
 import sys
+import warnings
 
 from . import prefs
 
@@ -60,7 +61,7 @@ EN: dict[str, str] = {
     "cli.help.trash_system": "use the OS trash instead of the in-vault trash (needs the send2trash package)",
     "cli.help.no_prune": "keep folders that end up empty",
     "cli.help.restore": "undo a previous clean",
-    "cli.help.restore_root": "note folder that was cleaned",
+    "cli.help.restore_root": "the notes folder(s) that were cleaned -- give the same ones as for clean",
     "cli.help.id": "batch id to restore (default: the most recent)",
     "cli.help.list": "list recorded batches and exit",
     "cli.help.dry_run": "show what would be restored",
@@ -112,6 +113,10 @@ EN: dict[str, str] = {
     "err.missing_from_trash": "{path}: missing from the trash",
     "err.already_exists": "{path}: already exists",
     "err.undecodable": "{path}: undecodable bytes, scanned with replacements",
+    "err.unreadable_manifest": (
+        "batch {batch} has an unreadable manifest ({detail}); "
+        "its files are untouched in {path}"
+    ),
     # -- gui --------------------------------------------------------------
     "gui.title": "Typora Pic Cleaner",
     "gui.cautious": "Cautious mode (also keep images merely named in the text)",
@@ -127,6 +132,13 @@ EN: dict[str, str] = {
     "gui.status.start": "Find or add your Typora notes folders, then scan.",
     "gui.status.scanning": "Scanning {count} folder(s)...",
     "gui.status.scan_failed": "Scan failed.",
+    "gui.status.moving": "Moving {count} file(s)…",
+    "gui.status.stale": (
+        "The folder list has changed since this scan. Scan again before cleaning -- "
+        "these results were never checked against the folders you ticked afterwards."
+    ),
+    "gui.details": "Details…",
+    "gui.details.title": "Scan details",
     "gui.caution": (
         "Files go to a recoverable trash. Scan the folder that contains ALL notes "
         "linking these images -- links from outside it cannot be seen."
@@ -159,12 +171,12 @@ EN: dict[str, str] = {
     "gui.section.notes": "Notes folders",
     "gui.section.images": "Image folders",
     "gui.section.options": "Options",
-    "gui.btn.find": "Find folders\u2026",
-    "gui.btn.add": "Add\u2026",
+    "gui.btn.find": "Find folders…",
+    "gui.btn.add": "Add…",
     "gui.btn.remove": "Remove",
     "gui.hint.notes": "Tick the folders to scan. Ticking a folder covers everything inside it.",
     "gui.hint.images": "Only needed when Typora saves pictures outside your notes folders.",
-    "gui.folder.counts": "{notes} md \u00b7 {images} img",
+    "gui.folder.counts": "{notes} md · {images} img",
     "gui.folder.covered": "in parent",
     "gui.folder.missing": "missing",
     "gui.tile.notes": "Notes",
@@ -177,12 +189,12 @@ EN: dict[str, str] = {
     "gui.menu.appearance.light": "Light",
     "gui.menu.appearance.dark": "Dark",
     "gui.pick_parent_title": "Choose a folder to search for notes folders in",
-    "gui.status.finding": "Looking through {path}\u2026",
+    "gui.status.finding": "Looking through {path}…",
     "gui.status.found": "Found {count} folder(s), {added} new. Nothing is scanned until you tick it.",
     "gui.status.found_none": "Nothing in there looks like a notes folder. Try one level up, or add the folder by hand.",
     "gui.empty.no_folders": "Tick at least one notes folder on the left.",
     "gui.empty.not_scanned": "Press Scan to see which pictures nothing points at.",
-    "gui.empty.nothing_found": "Nothing unreferenced \u2014 every picture is in use.",
+    "gui.empty.nothing_found": "Nothing unreferenced — every picture is in use.",
     "gui.menu.language": "Language",
     "gui.menu.lang.en": "English",
     "gui.menu.lang.zh": "简体中文",
@@ -228,7 +240,7 @@ ZH: dict[str, str] = {
     "cli.help.trash_system": "使用系统回收站而非笔记目录内的回收站（需要 send2trash 包）",
     "cli.help.no_prune": "保留因清理而变空的目录",
     "cli.help.restore": "撤销上一次清理",
-    "cli.help.restore_root": "被清理过的笔记目录",
+    "cli.help.restore_root": "被清理过的笔记目录；clean 时写了哪几个，这里就写哪几个",
     "cli.help.id": "要还原的批次号（默认：最近一次）",
     "cli.help.list": "列出已记录的清理批次并退出",
     "cli.help.dry_run": "只显示会还原什么，不实际还原",
@@ -240,7 +252,7 @@ ZH: dict[str, str] = {
     "cli.discover.none": "{path} 下面没有含笔记的文件夹。",
     "cli.discover.counts": "（{notes} 篇笔记，{images} 张图片）",
     "cli.discover.footer": "把其中任意几个传给 scan/clean 即可；多个文件夹会作为一个整体一起比对。",
-    "cli.discover.skipped": "\u53e6\u6709 {count} \u4e2a Markdown \u770b\u8d77\u6765\u662f\u8f6f\u4ef6\u81ea\u5e26\u7684\u6587\u6863\uff0c\u5df2\u4e0d\u8ba1\u5165\u3002\u60f3\u626b\u7684\u8bdd\u76f4\u63a5\u628a\u90a3\u4e2a\u76ee\u5f55\u5199\u6210\u53c2\u6570\u5373\u53ef\u3002",
+    "cli.discover.skipped": "另有 {count} 个 Markdown 看起来是软件自带的文档，已不计入。想扫的话直接把那个目录写成参数即可。",
     "cli.scan.footer": (
         "没有删除任何文件。请先人工过一遍上面的清单，确认无误后把命令换成 "
         "clean，才会把这些文件移到回收站。"
@@ -278,6 +290,7 @@ ZH: dict[str, str] = {
     "err.missing_from_trash": "{path}：回收站里找不到这个文件",
     "err.already_exists": "{path}：该位置已存在文件",
     "err.undecodable": "{path}：存在无法解码的字节，已用替换字符扫描",
+    "err.unreadable_manifest": "批次 {batch} 的清单文件读不出来（{detail}）；里面的文件原样留在 {path}",
     # -- gui --------------------------------------------------------------
     "gui.title": "Typora 图片清理",
     "gui.cautious": "保守模式（正文里光是提到文件名也保留）",
@@ -293,6 +306,10 @@ ZH: dict[str, str] = {
     "gui.status.start": "先查找或添加 Typora 笔记文件夹，然后扫描。",
     "gui.status.scanning": "正在扫描 {count} 个文件夹…",
     "gui.status.scan_failed": "扫描失败。",
+    "gui.status.moving": "正在移动 {count} 个文件…",
+    "gui.status.stale": "扫描之后文件夹清单改过了，请重新扫描再清理——现在这份结果没有和你后来勾选的文件夹比对过。",
+    "gui.details": "详情…",
+    "gui.details.title": "扫描详情",
     "gui.caution": (
         "文件会移到可恢复的回收站。请选择包含「所有」引用这些图片的笔记的目录——"
         "范围之外的引用工具看不见。"
@@ -312,7 +329,7 @@ ZH: dict[str, str] = {
         "把 {count} 个文件（{size}）移动到：\n{destination}\n\n"
         "不会真正删除——点「撤销上次清理」即可放回原位。"
     ),
-    "gui.confirm.move_body_system": "\u628a {count} \u4e2a\u6587\u4ef6\uff08{size}\uff09\u79fb\u52a8\u5230\uff1a\n{destination}\n\n\u8fd9\u79cd\u65b9\u5f0f\u65e0\u6cd5\u7528\u300c\u64a4\u9500\u4e0a\u6b21\u6e05\u7406\u300d\u8fd8\u539f\uff0c\u53ea\u80fd\u4f60\u81ea\u5df1\u53bb\u7cfb\u7edf\u56de\u6536\u7ad9\u91cc\u627e\u56de\u3002\u60f3\u8ba9\u64a4\u9500\u6309\u94ae\u80fd\u7528\uff0c\u8bf7\u53d6\u6d88\u52fe\u9009\u300c\u4f7f\u7528\u7cfb\u7edf\u56de\u6536\u7ad9\u300d\u3002",
+    "gui.confirm.move_body_system": "把 {count} 个文件（{size}）移动到：\n{destination}\n\n这种方式无法用「撤销上次清理」还原，只能你自己去系统回收站里找回。想让撤销按钮能用，请取消勾选「使用系统回收站」。",
     "gui.confirm.undo_title": "撤销上次清理？",
     "gui.confirm.undo_body": "把批次 {batch}（{created}）的 {count} 个文件放回原位？",
     "gui.info.moved": "已移动 {count} 个文件，共 {size}。",
@@ -321,34 +338,34 @@ ZH: dict[str, str] = {
     "gui.info.restore_skipped": "已跳过 {count} 个（原位置已有文件）：",
     "gui.info.restore_failed": "失败 {count} 个：",
     "gui.info.no_history": "以下目录没有清理历史：\n{path}",
-    "gui.subtitle": "\u627e\u51fa\u7b14\u8bb0\u5df2\u7ecf\u4e0d\u518d\u5f15\u7528\u7684\u56fe\u7247\u3002",
-    "gui.section.notes": "\u7b14\u8bb0\u6587\u4ef6\u5939",
-    "gui.section.images": "\u56fe\u7247\u6587\u4ef6\u5939",
-    "gui.section.options": "\u9009\u9879",
-    "gui.btn.find": "\u67e5\u627e\u6587\u4ef6\u5939\u2026",
-    "gui.btn.add": "\u6dfb\u52a0\u2026",
-    "gui.btn.remove": "\u79fb\u9664",
-    "gui.hint.notes": "\u52fe\u9009\u8981\u626b\u63cf\u7684\u6587\u4ef6\u5939\uff1b\u52fe\u4e0a\u4e0a\u7ea7\u5c31\u5305\u542b\u4e86\u5b83\u4e0b\u9762\u7684\u5168\u90e8\u5185\u5bb9\u3002",
-    "gui.hint.images": "\u4ec5\u5f53 Typora \u628a\u56fe\u7247\u5b58\u5728\u7b14\u8bb0\u6587\u4ef6\u5939\u4e4b\u5916\u65f6\u624d\u9700\u8981\u6dfb\u52a0\u3002",
-    "gui.folder.counts": "{notes} \u7bc7 \u00b7 {images} \u5f20",
-    "gui.folder.covered": "\u5df2\u542b\u5728\u4e0a\u7ea7",
-    "gui.folder.missing": "\u5df2\u4e0d\u5b58\u5728",
-    "gui.tile.notes": "\u7b14\u8bb0",
-    "gui.tile.images": "\u56fe\u7247",
-    "gui.tile.unreferenced": "\u672a\u88ab\u5f15\u7528",
-    "gui.tile.reclaimable": "\u53ef\u56de\u6536",
-    "gui.menu.settings": "\u8bbe\u7f6e",
-    "gui.menu.appearance": "\u5916\u89c2",
-    "gui.menu.appearance.auto": "\u8ddf\u968f\u7cfb\u7edf",
-    "gui.menu.appearance.light": "\u6d45\u8272",
-    "gui.menu.appearance.dark": "\u6df1\u8272",
-    "gui.pick_parent_title": "\u9009\u62e9\u8981\u5728\u5176\u4e2d\u67e5\u627e\u7b14\u8bb0\u6587\u4ef6\u5939\u7684\u76ee\u5f55",
-    "gui.status.finding": "\u6b63\u5728\u67e5\u627e {path}\u2026",
-    "gui.status.found": "\u627e\u5230 {count} \u4e2a\u6587\u4ef6\u5939\uff0c\u5176\u4e2d {added} \u4e2a\u662f\u65b0\u7684\u3002\u52fe\u9009\u4f60\u8981\u626b\u63cf\u7684\u2014\u2014\u6ca1\u52fe\u7684\u4e0d\u4f1a\u88ab\u626b\u3002",
-    "gui.status.found_none": "\u8fd9\u4e2a\u76ee\u5f55\u91cc\u6ca1\u627e\u5230\u50cf\u7b14\u8bb0\u5e93\u7684\u6587\u4ef6\u5939\u3002\u8bd5\u8bd5\u518d\u4e0a\u4e00\u5c42\uff0c\u6216\u8005\u76f4\u63a5\u7528\u300c\u6dfb\u52a0\u2026\u300d\u624b\u52a8\u6307\u5b9a\u3002",
-    "gui.empty.no_folders": "\u8bf7\u5148\u5728\u5de6\u4fa7\u52fe\u9009\u81f3\u5c11\u4e00\u4e2a\u7b14\u8bb0\u6587\u4ef6\u5939\u3002",
-    "gui.empty.not_scanned": "\u70b9\u53f3\u4e0b\u89d2\u7684\u626b\u63cf\uff0c\u770b\u770b\u54ea\u4e9b\u56fe\u7247\u5df2\u7ecf\u6ca1\u4eba\u5f15\u7528\u3002",
-    "gui.empty.nothing_found": "\u6ca1\u6709\u672a\u88ab\u5f15\u7528\u7684\u56fe\u7247\uff0c\u5168\u90fd\u5728\u7528\u3002",
+    "gui.subtitle": "找出笔记已经不再引用的图片。",
+    "gui.section.notes": "笔记文件夹",
+    "gui.section.images": "图片文件夹",
+    "gui.section.options": "选项",
+    "gui.btn.find": "查找文件夹…",
+    "gui.btn.add": "添加…",
+    "gui.btn.remove": "移除",
+    "gui.hint.notes": "勾选要扫描的文件夹；勾上上级就包含了它下面的全部内容。",
+    "gui.hint.images": "仅当 Typora 把图片存在笔记文件夹之外时才需要添加。",
+    "gui.folder.counts": "{notes} 篇 · {images} 张",
+    "gui.folder.covered": "已含在上级",
+    "gui.folder.missing": "已不存在",
+    "gui.tile.notes": "笔记",
+    "gui.tile.images": "图片",
+    "gui.tile.unreferenced": "未被引用",
+    "gui.tile.reclaimable": "可回收",
+    "gui.menu.settings": "设置",
+    "gui.menu.appearance": "外观",
+    "gui.menu.appearance.auto": "跟随系统",
+    "gui.menu.appearance.light": "浅色",
+    "gui.menu.appearance.dark": "深色",
+    "gui.pick_parent_title": "选择要在其中查找笔记文件夹的目录",
+    "gui.status.finding": "正在查找 {path}…",
+    "gui.status.found": "找到 {count} 个文件夹，其中 {added} 个是新的。勾选你要扫描的——没勾的不会被扫。",
+    "gui.status.found_none": "这个目录里没找到像笔记库的文件夹。试试再上一层，或者直接用「添加…」手动指定。",
+    "gui.empty.no_folders": "请先在左侧勾选至少一个笔记文件夹。",
+    "gui.empty.not_scanned": "点右下角的扫描，看看哪些图片已经没人引用。",
+    "gui.empty.nothing_found": "没有未被引用的图片，全都在用。",
     "gui.menu.language": "语言",
     "gui.menu.lang.en": "English",
     "gui.menu.lang.zh": "简体中文",
@@ -430,8 +447,16 @@ def detect_language() -> str:
         language = probe()
         if language:
             return language
+    # Deprecated since 3.11 and due to disappear, hence the lookup by name; the
+    # environment and both desktop platforms have already been asked by now, so
+    # losing this last guess costs nothing.
+    getdefaultlocale = getattr(locale, "getdefaultlocale", None)
+    if getdefaultlocale is None:
+        return DEFAULT
     try:
-        return _normalise(locale.getdefaultlocale()[0]) or DEFAULT
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            return _normalise(getdefaultlocale()[0]) or DEFAULT
     except (ValueError, TypeError):
         return DEFAULT
 

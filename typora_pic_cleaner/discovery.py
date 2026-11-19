@@ -17,7 +17,7 @@ import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from .paths import has_image_ext
+from .paths import escapes, has_image_ext
 from .scanner import MARKDOWN_EXTS, prune_dirnames
 
 #: How far below the chosen parent folders are offered.  Deeper directories are
@@ -30,15 +30,21 @@ DEFAULT_MAX_DEPTH = 3
 #: turns a list of four real folders into a list of forty.  Only the *search*
 #: skips these: a folder added by hand is always honoured, whatever it is
 #: called, because then the user has said so explicitly.
+#: These names are skipped wherever they turn up, being ones nobody would give
+#: a folder of notes.
 UNINTERESTING_DIRS = frozenset({
-    # Windows system and recycle trees
-    "$recycle.bin", "$winreagent", "system volume information", "recovery",
-    "appdata", "program files", "program files (x86)", "programdata", "windows",
-    # macOS
-    "library", "applications",
-    # Python and package managers
-    "site-packages", "dist-packages", "__pypackages__", ".tox", "vendor",
+    "$recycle.bin", "$winreagent", "system volume information",
+    "site-packages", "dist-packages", "__pypackages__",
     "anaconda", "anaconda3", "miniconda", "miniconda3", "miniforge3",
+})
+
+#: These are ordinary words, and only mean "the operating system's" in the two
+#: places the system puts them: the top of a drive and the user's home folder.
+#: ``~/Library`` is macOS's; ``~/Notes/Library`` is somebody's reading list,
+#: and skipping it would hide a real folder without a word.
+SYSTEM_DIRS_AT_TOP = frozenset({
+    "windows", "program files", "program files (x86)", "programdata", "recovery",
+    "appdata", "library", "applications", "vendor",
 })
 
 #: Note names that come with a package rather than from a person.  A folder
@@ -185,6 +191,17 @@ class FolderSet:
             existing.missing = folder.missing
         return added
 
+    def include(self, folder: Folder) -> None:
+        """Add a folder the user picked by hand, ticked.
+
+        Unlike :meth:`merge` this does overwrite the tick.  Someone who goes to
+        the trouble of choosing a folder that a search already listed -- and
+        left unticked -- is saying they want it scanned; leaving the row as it
+        was would make the dialog look as if it had done nothing.
+        """
+        self.merge([folder])
+        self._by_key[key_for(folder.path)].selected = True
+
     def remove(self, paths: List[str]) -> int:
         """Drop *paths* and anything nested inside them."""
         doomed = set()
@@ -260,7 +277,7 @@ def within(path: str, root: str) -> bool:
     if path == root:
         return False
     try:
-        return not os.path.relpath(path, root).startswith(os.pardir)
+        return not escapes(os.path.relpath(path, root))
     except ValueError:
         return False
 
@@ -283,12 +300,18 @@ def discover(
     images: Dict[str, int] = {}
     own: Dict[str, int] = {}
     skipped: Dict[str, int] = {}
+    depths: Dict[str, int] = {parent: 0}
     visited: List[str] = []
 
+    home = key_for(os.path.expanduser("~"))
     for dirpath, dirnames, filenames in os.walk(parent, onerror=lambda _e: None):
         prune_dirnames(dirnames)
         dirnames[:] = [d for d in dirnames if d.lower() not in UNINTERESTING_DIRS]
+        if os.path.dirname(dirpath) == dirpath or key_for(dirpath) == home:
+            dirnames[:] = [d for d in dirnames if d.lower() not in SYSTEM_DIRS_AT_TOP]
         visited.append(dirpath)
+        for dirname in dirnames:
+            depths[os.path.join(dirpath, dirname)] = depths[dirpath] + 1
         note_count = image_count = boilerplate = 0
         for filename in filenames:
             stem, ext = os.path.splitext(filename)
@@ -302,24 +325,24 @@ def discover(
                     note_count += 1
             elif has_image_ext(filename, extra_exts):
                 image_count += 1
-        own[dirpath] = note_count
-        # Credit every ancestor up to the chosen parent, so a folder's row
-        # reports its whole subtree even when the notes live three levels down.
-        current = dirpath
-        while True:
-            notes[current] = notes.get(current, 0) + note_count
-            images[current] = images.get(current, 0) + image_count
-            skipped[current] = skipped.get(current, 0) + boilerplate
-            if _same(current, parent):
-                break
-            upwards = os.path.dirname(current)
-            if upwards == current:
-                break
-            current = upwards
+        own[dirpath] = notes[dirpath] = note_count
+        images[dirpath] = image_count
+        skipped[dirpath] = boilerplate
+
+    # Roll every folder up into the one above it, so a row reports its whole
+    # subtree even when the notes live three levels down.  The walk is top-down,
+    # so going through it backwards reaches each folder after all its children:
+    # one addition per directory, where crediting every ancestor from inside
+    # the walk cost one per directory per level -- which adds up on a whole drive.
+    for dirpath in reversed(visited[1:]):
+        above = os.path.dirname(dirpath)
+        notes[above] += notes[dirpath]
+        images[above] += images[dirpath]
+        skipped[above] += skipped[dirpath]
 
     found: List[Candidate] = []
     for dirpath in visited:
-        depth = _depth(dirpath, parent)
+        depth = depths[dirpath]
         if depth > max_depth or not notes.get(dirpath):
             continue
         found.append(
@@ -353,17 +376,3 @@ def summarise(path: str, extra_exts: frozenset = frozenset()) -> Tuple[int, int]
             elif has_image_ext(filename, extra_exts):
                 images += 1
     return notes, images
-
-
-def _depth(path: str, parent: str) -> int:
-    if _same(path, parent):
-        return 0
-    try:
-        relative = os.path.relpath(path, parent)
-    except ValueError:
-        return DEFAULT_MAX_DEPTH + 1
-    return relative.count(os.sep) + 1
-
-
-def _same(left: str, right: str) -> bool:
-    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))

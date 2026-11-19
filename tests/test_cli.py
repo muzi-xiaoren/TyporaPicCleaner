@@ -157,10 +157,21 @@ class SeveralRootsTests(VaultTestCase):
         self.assertFalse(os.path.exists(self.path("shared/nobody.png")))
         self.assertTrue(os.path.exists(self.path("shared/logo.png")))
 
-    def test_undo_looks_under_the_first_folder_given(self):
+    def test_undo_takes_the_same_folders_the_clean_did(self):
         run(["clean", self.path("work"), self.path("shared"), "-y"])
-        code, out, _ = run(["restore", self.path("work")])
+        self.assertFalse(os.path.exists(self.path("shared/nobody.png")))
+        code, out, _ = run(["restore", self.path("work"), self.path("shared")])
         self.assertEqual(0, code)
+        self.assertTrue(os.path.exists(self.path("shared/nobody.png")))
+
+    def test_the_picture_waits_in_the_folder_it_came_from(self):
+        run(["clean", self.path("work"), self.path("shared"), "-y"])
+        self.assertTrue(os.path.isdir(self.path("shared/.typora-pic-trash")))
+        self.assertFalse(os.path.exists(self.path("work/.typora-pic-trash")))
+
+    def test_clean_refuses_a_json_flag_it_would_only_ignore(self):
+        with self.assertRaises(SystemExit):
+            run(["clean", self.path("work"), "--json", "-y"])
         self.assertTrue(os.path.exists(self.path("shared/nobody.png")))
 
 

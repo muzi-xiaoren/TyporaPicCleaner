@@ -25,14 +25,15 @@ from typing import Dict, List, Optional
 
 from . import prefs
 from .actions import (
-    UnsafePath, move_to_trash, newest_restorable, restore_batch, trash_root_for,
+    UnsafePath, batches_named, move_to_trash, newest_restorable, restore_everywhere,
+    trash_destinations, trash_root_for,
 )
 from .compare import Analysis, analyze
 from .discovery import Folder, discover, shorten, summarise
 from .folderlist import FolderList
 from .i18n import get_language, set_language, t
 from .palette import CHECKED, UNCHECKED
-from .report import display_path, human_size
+from .report import display_path, human_report, human_size
 from .theme import RoundedButton, Theme
 
 SIDEBAR_WIDTH = 320
@@ -45,7 +46,14 @@ class App:
         self.analysis: Optional[Analysis] = None
         self.results: "queue.Queue[tuple]" = queue.Queue()
         self.rows: List[dict] = []
+        #: Treeview item id -> its row, so a click does not search the list.
+        self._row_by_item: Dict[str, dict] = {}
         self.busy = False
+        #: What the results on screen were scanned from, and whether the folder
+        #: list has moved on since.  Stale results can still be read, but not
+        #: cleaned: they were never checked against the notes ticked afterwards.
+        self._scanned: Optional[tuple] = None
+        self.stale = False
         #: Labels whose text has to re-flow when a sash moves.
         self._wrapping: List[tuple] = []
         self._sash_main = prefs.load_pixel("sash_main", SIDEBAR_WIDTH)
@@ -56,8 +64,8 @@ class App:
 
         self.notes_folders = self._restore_notes_folders(initial_roots or [])
         self.image_folders = [
-            Folder(path=path, selected=True, missing=not os.path.isdir(path))
-            for path in prefs.load_image_folders()
+            Folder(path=path, selected=selected, missing=not os.path.isdir(path))
+            for path, selected in prefs.load_image_folders()
         ]
         self.paranoid = tk.BooleanVar(value=bool(prefs.load().get("paranoid")))
         self.system_trash = tk.BooleanVar(value=False)
@@ -99,14 +107,16 @@ class App:
         if hasattr(self, "notes_list"):
             self.notes_folders = self.notes_list.folders()
             self.image_folders = self.image_list.folders()
+        # The dividers too: a rebuild puts them back where these say, and a
+        # change of language should not undo a drag made a moment earlier.
+        positions = self._sash_positions()
+        self._sash_main = positions.get("sash_main", self._sash_main)
+        self._sash_side = positions.get("sash_side", self._sash_side)
 
     def _persist(self) -> None:
         self._capture()
         prefs.save_note_folders([(f.path, f.selected) for f in self.notes_folders])
-        prefs.save_image_folders([f.path for f in self.image_folders if f.selected])
-        positions = self._sash_positions()
-        self._sash_main = positions.get("sash_main", self._sash_main)
-        self._sash_side = positions.get("sash_sidebar", self._sash_side)
+        prefs.save_image_folders([(f.path, f.selected) for f in self.image_folders])
         prefs.save(paranoid=bool(self.paranoid.get()), appearance=self.appearance,
                    sash_main=self._sash_main, sash_side=self._sash_side)
 
@@ -124,7 +134,11 @@ class App:
             child.destroy()
         self._wrapping = []
         self.root.configure(background=self.theme.color("bg"))
-        self._build_menubar()
+        # A menu bar only where the platform keeps one at the top of the screen.
+        # Inside the window, on Windows and Linux, it would be a second copy of
+        # the Settings button sitting right above it.
+        if self.root.tk.call("tk", "windowingsystem") == "aqua":
+            self._build_menubar()
         self._build_header()
         self._build_body()
         self._build_footer()
@@ -132,6 +146,10 @@ class App:
         self._render_rows()
         self._render_stats()
         self._refresh_undo_state()
+        if self.busy:
+            # Rebuilt in the middle of a scan: the new widgets have to look as
+            # busy as the ones they replaced.
+            self._show_busy()
 
     def _rebuild(self) -> None:
         self._capture()
@@ -213,7 +231,7 @@ class App:
         """Where the dividers are, ignoring the zero an unmapped pane reports."""
         found = {}
         for name, panes in (("sash_main", getattr(self, "body", None)),
-                            ("sash_sidebar", getattr(self, "sidebar_panes", None))):
+                            ("sash_side", getattr(self, "sidebar_panes", None))):
             if panes is None:
                 continue
             try:
@@ -302,6 +320,9 @@ class App:
         RoundedButton(toolbar, self.theme, t("gui.select_none"),
                       command=lambda: self._set_all(False), kind="ghost", padding=10).pack(
             side="left", padx=(6, 0))
+        self.details_button = RoundedButton(toolbar, self.theme, t("gui.details"),
+                                            command=self._show_details, kind="ghost", padding=10)
+        self.details_button.pack(side="left", padx=(6, 0))
         self.summary = ttk.Label(toolbar, text="", style="Muted.TLabel")
         self.summary.pack(side="right")
 
@@ -365,7 +386,6 @@ class App:
                             wraplength=560, justify="left")
         caution.pack(anchor="w", pady=(2, 0))
         self._wrapping.append((caution, text, 12))
-        self.status_label.configure(wraplength=560)
         self._wrapping.append((self.status_label, text, 12))
         footer.bind("<Configure>", lambda _event: self._rewrap())
 
@@ -397,9 +417,24 @@ class App:
 
     # ------------------------------------------------------------ folder list
 
+    def _scan_inputs(self) -> tuple:
+        """The folders a scan started now would be given."""
+        image_dirs = tuple(
+            folder.path for folder in self.image_list.folders()
+            if folder.selected and os.path.isdir(folder.path)
+        )
+        return tuple(self.notes_list.selected_paths()), image_dirs
+
+    def _all_roots(self) -> List[str]:
+        """Every ticked folder, notes and images alike: each may hold a trash."""
+        roots, image_dirs = self._scan_inputs()
+        return list(roots) + list(image_dirs)
+
     def _folders_changed(self) -> None:
         self._persist()
+        self.stale = self._scanned is not None and self._scanned != self._scan_inputs()
         self._render_status()
+        self._refresh_summary()
         self._refresh_undo_state()
 
     def _find_folders(self) -> None:
@@ -426,8 +461,8 @@ class App:
         if not chosen:
             return
         notes, images = summarise(chosen)
-        self.notes_list.merge([Folder(path=chosen, selected=True, notes=notes,
-                                      images=images, counted=True)])
+        self.notes_list.include(Folder(path=chosen, selected=True, notes=notes,
+                                       images=images, counted=True))
         self._folders_changed()
 
     def _add_image_folder(self) -> None:
@@ -435,8 +470,8 @@ class App:
         if not chosen:
             return
         notes, images = summarise(chosen)
-        self.image_list.merge([Folder(path=chosen, selected=True, notes=notes,
-                                      images=images, counted=True)])
+        self.image_list.include(Folder(path=chosen, selected=True, notes=notes,
+                                       images=images, counted=True))
         self._folders_changed()
 
     # ---------------------------------------------------------------- results
@@ -451,6 +486,7 @@ class App:
             self.tiles["images"].configure(text=str(analysis.total_images))
             self.tiles["unreferenced"].configure(text=str(len(analysis.unreferenced)))
             self.tiles["reclaimable"].configure(text=human_size(analysis.reclaimable_bytes))
+        self.details_button.set_state("normal" if analysis is not None else "disabled")
         self._draw_bar()
 
     def _draw_bar(self) -> None:
@@ -473,6 +509,7 @@ class App:
 
     def _render_rows(self) -> None:
         self.tree.delete(*self.tree.get_children())
+        self._row_by_item = {}
         for index, row in enumerate(self.rows):
             item = self.tree.insert(
                 "", "end",
@@ -481,6 +518,7 @@ class App:
                 tags=("odd" if index % 2 else "even",),
             )
             row["item"] = item
+            self._row_by_item[item] = row
         if self.rows:
             self.empty.place_forget()
         else:
@@ -502,7 +540,8 @@ class App:
             text=t("gui.summary", count=len(chosen), size=human_size(total)) if self.rows else ""
         )
         if hasattr(self, "clean_button"):
-            self.clean_button.set_state("normal" if chosen and not self.busy else "disabled")
+            self.clean_button.set_state(
+                "normal" if chosen and not self.busy and not self.stale else "disabled")
 
     def _on_row_click(self, event: tk.Event):
         if self.tree.identify_region(event.x, event.y) != "cell":
@@ -521,11 +560,10 @@ class App:
         return "break"
 
     def _toggle_item(self, item: str, refresh: bool = True) -> None:
-        for row in self.rows:
-            if row.get("item") == item:
-                row["checked"] = not row["checked"]
-                self.tree.set(item, "check", CHECKED if row["checked"] else UNCHECKED)
-                break
+        row = self._row_by_item.get(item)
+        if row is not None:
+            row["checked"] = not row["checked"]
+            self.tree.set(item, "check", CHECKED if row["checked"] else UNCHECKED)
         if refresh:
             self._refresh_summary()
 
@@ -540,37 +578,37 @@ class App:
         selection = self.tree.selection()
         if not selection:
             return
-        paths = [row["path"] for row in self.rows if row.get("item") == selection[0]]
-        if paths:
-            reveal(paths[0])
+        row = self._row_by_item.get(selection[0])
+        if row is not None:
+            reveal(row["path"])
 
     # ---------------------------------------------------------------- actions
 
     def _set_busy(self, busy: bool, key: str = "", params: Optional[dict] = None) -> None:
         self.busy = busy
-        self.scan_button.set_state("disabled" if busy else "normal")
         if busy:
-            self.clean_button.set_state("disabled")
-            self.progress.pack(fill="x", before=self.rule)
-            self.progress.start(12)
             self.status_key, self.status_params, self.status_text = key, params or {}, None
+            self._show_busy()
             self._render_status()
         else:
+            self.scan_button.set_state("normal")
             self.progress.stop()
             self.progress.pack_forget()
             self._refresh_summary()
 
+    def _show_busy(self) -> None:
+        self.scan_button.set_state("disabled")
+        self.clean_button.set_state("disabled")
+        self.progress.pack(fill="x", before=self.rule)
+        self.progress.start(12)
+
     def _scan(self) -> None:
         if self.busy:
             return
-        roots = self.notes_list.selected_paths()
+        roots, image_dirs = self._scan_inputs()
         if not roots:
             messagebox.showerror(t("gui.title"), t("gui.err.pick_notes_first"))
             return
-        image_dirs = tuple(
-            folder.path for folder in self.image_list.folders()
-            if folder.selected and os.path.isdir(folder.path)
-        )
         # Every Tk variable is read here, on the main thread: touching one from
         # the worker raises "main thread is not in main loop".
         paranoid = self.paranoid.get()
@@ -579,14 +617,17 @@ class App:
 
         def work() -> None:
             try:
-                self.results.put(("scan", analyze(roots, image_dirs=image_dirs, paranoid=paranoid)))
+                analysis = analyze(roots, image_dirs=image_dirs, paranoid=paranoid)
+                self.results.put(("scan", (analysis, (roots, image_dirs))))
             except Exception as exc:
                 self.results.put(("error", exc))
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _show_analysis(self, analysis: Analysis) -> None:
+    def _show_analysis(self, analysis: Analysis, scanned: Optional[tuple] = None) -> None:
         self.analysis = analysis
+        self._scanned = scanned
+        self.stale = scanned is not None and scanned != self._scan_inputs()
         self.rows = [
             {"path": image.path, "size": image.size, "checked": True,
              "display": display_path(image.path, analysis.md_roots, analysis.image_dirs), "item": None}
@@ -615,18 +656,45 @@ class App:
     def _render_status(self) -> None:
         if not hasattr(self, "status_label"):
             return
-        text = self.status_text if self.status_text else t(self.status_key, **self.status_params)
+        if self.stale and not self.busy:
+            text = t("gui.status.stale")
+        else:
+            text = self.status_text if self.status_text else t(self.status_key, **self.status_params)
         self.status_label.configure(text=text)
 
+    def _show_details(self) -> None:
+        """The full report: which links are broken, what could not be read.
+
+        The window's own list only has room for the pictures; everything else
+        the scan learned would otherwise be reduced to a count in the footer.
+        """
+        if self.analysis is None:
+            return
+        window = tk.Toplevel(self.root)
+        window.title(t("gui.details.title"))
+        window.geometry("820x560")
+        window.configure(background=self.theme.color("bg"))
+        text = tk.Text(window, wrap="none", borderwidth=0, highlightthickness=0,
+                       padx=PAD, pady=PAD, font=self.theme.font("body"),
+                       background=self.theme.color("bg"), foreground=self.theme.color("text"))
+        scrollbar = ttk.Scrollbar(window, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+        text.insert("1.0", human_report(self.analysis, limit=500))
+        text.configure(state="disabled")
+
     def _clean(self) -> None:
-        if not self.analysis or self.busy:
+        if not self.analysis or self.busy or self.stale:
             return
         chosen = [row for row in self.rows if row["checked"]]
         if not chosen:
             return
+        paths = [row["path"] for row in chosen]
+        roots = self.analysis.roots
         system = self.system_trash.get()
         destination = (t("cli.clean.system_trash") if system
-                       else trash_root_for(self.analysis.md_root))
+                       else "\n".join(trash_destinations(paths, roots)))
         if not messagebox.askyesno(
             t("gui.confirm.move_title"),
             t("gui.confirm.move_body_system" if system else "gui.confirm.move_body",
@@ -634,16 +702,19 @@ class App:
               destination=destination),
         ):
             return
-        try:
-            batch = move_to_trash(
-                [row["path"] for row in chosen],
-                roots=self.analysis.roots,
-                md_root=self.analysis.md_root,
-                system_trash=self.system_trash.get(),
-            )
-        except UnsafePath as exc:
-            messagebox.showerror(t("gui.title"), str(exc))
-            return
+        self._set_busy(True, "gui.status.moving", {"count": len(paths)})
+
+        # Off the main thread like the scan: ten thousand pictures take long
+        # enough that a frozen window looks like a crash.
+        def work() -> None:
+            try:
+                self.results.put(("clean", move_to_trash(paths, roots=roots, system_trash=system)))
+            except Exception as exc:
+                self.results.put(("clean_failed", exc))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _after_clean(self, batch) -> None:
         message = t("gui.info.moved", count=len(batch.entries), size=human_size(batch.moved_bytes))
         if batch.failures:
             message += "\n\n" + t("gui.info.move_failures", count=len(batch.failures)) + "\n"
@@ -658,7 +729,7 @@ class App:
         reordered between launches, and an undo that quietly looks in the wrong
         place is worse than no undo button.
         """
-        return newest_restorable(self.notes_list.selected_paths())
+        return newest_restorable(self._all_roots())
 
     def _refresh_undo_state(self) -> None:
         """Light the undo button only when it has something to undo.
@@ -671,7 +742,7 @@ class App:
             self.undo_button.set_state("normal" if self._undoable() else "disabled")
 
     def _restore(self) -> None:
-        roots = self.notes_list.selected_paths()
+        roots = self._all_roots()
         if not roots:
             messagebox.showerror(t("gui.title"), t("gui.err.pick_cleaned_folder"))
             return
@@ -680,15 +751,19 @@ class App:
             messagebox.showinfo(t("gui.title"),
                                 t("gui.info.no_history", path=trash_root_for(roots[0])))
             return
-        root, newest = found
+        _root, newest = found
+        batch_id = newest.get("batch_id")
+        # One clean-up leaves a share in each folder it touched; the question
+        # put to the user has to count all of them.
+        count = sum(len(batch.get("entries", [])) for _r, batch in batches_named(roots, batch_id))
         if not messagebox.askyesno(
             t("gui.confirm.undo_title"),
-            t("gui.confirm.undo_body", count=len(newest.get("entries", [])),
-              batch=newest.get("batch_id"), created=newest.get("created")),
+            t("gui.confirm.undo_body", count=count,
+              batch=batch_id, created=newest.get("created")),
         ):
             return
         try:
-            result = restore_batch(root, batch_id=newest.get("batch_id"))
+            result = restore_everywhere(roots, batch_id=batch_id)
         except UnsafePath as exc:
             messagebox.showerror(t("gui.title"), str(exc))
             return
@@ -710,7 +785,14 @@ class App:
                 kind, payload = self.results.get_nowait()
                 self._set_busy(False)
                 if kind == "scan":
-                    self._show_analysis(payload)
+                    self._show_analysis(*payload)
+                elif kind == "clean":
+                    self._after_clean(payload)
+                elif kind == "clean_failed":
+                    # The scan on screen is still good; only the move failed.
+                    self.status_text = self._summary_line(self.analysis) if self.analysis else None
+                    self._render_status()
+                    messagebox.showerror(t("gui.title"), str(payload))
                 elif kind == "discover":
                     self._absorb_discovery(payload)
                 else:

@@ -6,19 +6,17 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Tuple
 
-from .paths import has_image_ext
+from .i18n import t
+from .paths import has_image_ext, is_within
 
 MARKDOWN_EXTS = frozenset({".md", ".markdown", ".mdown", ".mkd", ".mdwn", ".mdtxt"})
 
 #: Directories that never hold a user's notes or pictures.  Skipping them keeps
 #: the scan quick and, more importantly, stops us proposing to delete images
-#: belonging to a checked-out repository or a plugin.
-SKIP_DIRS = frozenset(
-    {
-        ".git", ".hg", ".svn", "node_modules", ".obsidian", ".trash", ".idea",
-        ".vscode", "__pycache__", ".venv", "venv", ".DS_Store", ".stfolder",
-    }
-)
+#: belonging to a checked-out repository or a plugin.  Only the names without a
+#: leading dot need listing: every dot-directory (.git, .obsidian, .venv, ...)
+#: is skipped wholesale by :func:`prune_dirnames`.
+SKIP_DIRS = frozenset({"node_modules", "__pycache__", "venv"})
 
 TRASH_DIRNAME = ".typora-pic-trash"
 
@@ -46,7 +44,7 @@ def prune_dirnames(dirnames: list[str]) -> None:
     """Drop, in place, the directories no walk of a vault should descend into."""
     dirnames[:] = [
         d for d in dirnames
-        if d not in SKIP_DIRS and d != TRASH_DIRNAME and not d.startswith(".")
+        if d not in SKIP_DIRS and not d.startswith(".")
     ]
 
 
@@ -117,7 +115,7 @@ def detect_layouts(
         names = ", ".join(sorted(os.path.basename(p) for p in shared)[:4])
         layouts.append(("layout.shared_folders", {"count": len(shared), "names": names}))
 
-    external = [d for d in image_dirs if not any(_under(d, root) for root in md_roots)]
+    external = [d for d in image_dirs if not any(is_within(d, root) for root in md_roots)]
     if external:
         layouts.append(("layout.global_folder", {"dirs": ", ".join(external)}))
 
@@ -127,20 +125,11 @@ def detect_layouts(
         1 for image in walk.images
         if os.path.basename(os.path.dirname(image.path)).lower() not in SHARED_IMAGE_DIRNAMES
         and not os.path.dirname(image.path).lower().endswith(".assets")
-        and not any(_under(image.path, image_dir) for image_dir in image_dirs)
+        and not any(is_within(image.path, image_dir) for image_dir in image_dirs)
     )
     if loose:
         layouts.append(("layout.loose", {"count": loose}))
     return layouts or [("layout.none", {})]
-
-
-def _under(path: str, root: str) -> bool:
-    try:
-        return not os.path.relpath(
-            os.path.realpath(path), os.path.realpath(root)
-        ).startswith(os.pardir)
-    except ValueError:
-        return False
 
 
 def read_text_best_effort(path: str) -> tuple[str, str | None]:
@@ -165,4 +154,4 @@ def read_text_best_effort(path: str) -> tuple[str, str | None]:
             return raw.decode(encoding), None
         except (UnicodeDecodeError, LookupError):
             continue
-    return raw.decode("utf-8", errors="replace"), f"{path}: undecodable bytes, scanned with replacements"
+    return raw.decode("utf-8", errors="replace"), t("err.undecodable", path=path)

@@ -59,9 +59,9 @@ DARK: Dict[str, str] = {
 #: one and a half between macOS and Windows, so a single number would be
 #: unreadable on one of them.
 SIZES = {
-    "darwin": {"title": 20, "heading": 15, "body": 13, "small": 11, "tiny": 10, "number": 22},
-    "win32": {"title": 16, "heading": 12, "body": 10, "small": 9, "tiny": 8, "number": 18},
-    "other": {"title": 16, "heading": 12, "body": 10, "small": 9, "tiny": 8, "number": 18},
+    "darwin": {"title": 20, "body": 13, "small": 11, "number": 22},
+    "win32": {"title": 16, "body": 10, "small": 9, "number": 18},
+    "other": {"title": 16, "body": 10, "small": 9, "number": 18},
 }
 
 #: First match wins.  The CJK faces matter on Windows, where the default UI font
@@ -111,11 +111,11 @@ def detect_mode() -> str:
         try:
             import winreg
 
-            key = winreg.OpenKey(
+            with winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-            )
-            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            ) as key:
+                value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
             return "light" if value else "dark"
         except Exception:
             return "light"

@@ -26,11 +26,9 @@ from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Callable, Dict, Optional
 
-from .palette import (
-    CHECKED, DARK, FAMILIES, LIGHT, SIZES, UNCHECKED, detect_mode, prefers_native_ttk,
-)
+from .palette import DARK, FAMILIES, LIGHT, SIZES, detect_mode, prefers_native_ttk
 
-__all__ = ["CHECKED", "UNCHECKED", "LIGHT", "DARK", "detect_mode", "Theme", "RoundedButton"]
+__all__ = ["Theme", "RoundedButton"]
 
 
 class Theme:
@@ -61,15 +59,10 @@ class Theme:
     def _build_fonts(self) -> None:
         self.fonts = {
             "title": tkfont.Font(family=self._family, size=self._sizes["title"], weight="bold"),
-            "heading": tkfont.Font(family=self._family, size=self._sizes["heading"], weight="bold"),
             "body": tkfont.Font(family=self._family, size=self._sizes["body"]),
-            "body_bold": tkfont.Font(family=self._family, size=self._sizes["body"], weight="bold"),
             "small": tkfont.Font(family=self._family, size=self._sizes["small"]),
             "small_bold": tkfont.Font(family=self._family, size=self._sizes["small"], weight="bold"),
-            "tiny": tkfont.Font(family=self._family, size=self._sizes["tiny"]),
             "number": tkfont.Font(family=self._family, size=self._sizes["number"], weight="bold"),
-            "mono": tkfont.Font(family="Menlo" if sys.platform == "darwin" else "Consolas",
-                                size=self._sizes["small"]),
         }
 
     def font(self, name: str) -> tkfont.Font:
@@ -110,28 +103,19 @@ class Theme:
         for name, key, colour in (
             ("TLabel", "body", "text"),
             ("Title.TLabel", "title", "text"),
-            ("Heading.TLabel", "heading", "text"),
             ("Muted.TLabel", "small", "muted"),
             ("Faint.TLabel", "small", "faint"),
-            ("Section.TLabel", "small_bold", "muted"),
-            ("Number.TLabel", "number", "text"),
             ("Warn.TLabel", "small", "warn"),
-            ("Danger.TLabel", "small", "danger"),
-            ("Ok.TLabel", "small", "ok"),
         ):
             style.configure(name, font=self.fonts[key], foreground=c[colour], background=c["bg"])
         # Same scale again on the two other surfaces.  ttk has no notion of
         # inheriting a background, so each one needs its own style name.
         for name, key, colour in (
             ("CardNumber.TLabel", "number", "text"),
-            ("CardHeading.TLabel", "heading", "text"),
-            ("CardBody.TLabel", "body", "text"),
             ("CardMuted.TLabel", "small", "muted"),
         ):
             style.configure(name, font=self.fonts[key], foreground=c[colour],
                             background=c["raised"])
-        style.configure("SidebarBody.TLabel", font=self.fonts["body"],
-                        foreground=c["text"], background=c["sidebar"])
         for name in ("SidebarSection.TLabel", "SidebarMuted.TLabel"):
             style.configure(name, background=c["sidebar"], foreground=c["muted"],
                             font=self.fonts["small_bold" if "Section" in name else "small"])
@@ -145,10 +129,6 @@ class Theme:
                   foreground=[("disabled", c["faint"])])
         style.configure("Sidebar.TCheckbutton", background=c["sidebar"])
         style.map("Sidebar.TCheckbutton", background=[("active", c["sidebar"])])
-
-        style.configure("TEntry", fieldbackground=c["raised"], foreground=c["text"],
-                        bordercolor=c["border_strong"], lightcolor=c["border_strong"],
-                        darkcolor=c["border_strong"], insertcolor=c["text"], padding=6)
 
         style.configure("Treeview", background=c["bg"], fieldbackground=c["bg"],
                         foreground=c["text"], rowheight=self._row_height(),
@@ -175,18 +155,17 @@ class Theme:
         # An arrowless, trackless scrollbar -- the arrows are the single most
         # dated thing in a default ttk window.
         for orient in ("Vertical", "Horizontal"):
-            try:
-                if not self.custom:
-                    raise tk.TclError("native scrollbars keep their own layout")
-                style.layout(
-                    f"{orient}.TScrollbar",
-                    [(f"{orient}.Scrollbar.trough",
-                      {"children": [(f"{orient}.Scrollbar.thumb",
-                                     {"expand": "1", "sticky": "nswe"})],
-                       "sticky": "ns" if orient == "Vertical" else "ew"})],
-                )
-            except tk.TclError:  # pragma: no cover
-                pass
+            if self.custom:  # native scrollbars keep their own layout
+                try:
+                    style.layout(
+                        f"{orient}.TScrollbar",
+                        [(f"{orient}.Scrollbar.trough",
+                          {"children": [(f"{orient}.Scrollbar.thumb",
+                                         {"expand": "1", "sticky": "nswe"})],
+                           "sticky": "ns" if orient == "Vertical" else "ew"})],
+                    )
+                except tk.TclError:  # pragma: no cover
+                    pass
             style.configure(f"{orient}.TScrollbar", background=c["border_strong"],
                             troughcolor=c["bg"], borderwidth=0, arrowsize=0, width=8)
             style.map(f"{orient}.TScrollbar", background=[("active", c["faint"])])
@@ -194,7 +173,6 @@ class Theme:
         style.configure("Thin.Horizontal.TProgressbar", background=c["accent"],
                         troughcolor=c["track"], borderwidth=0, thickness=3,
                         lightcolor=c["accent"], darkcolor=c["accent"])
-        style.configure("TSeparator", background=c["border"])
         style.configure("TPanedwindow", background=c["bg"])
         # A sash you can actually grab: 6px, no grip dimple, the same colour as
         # the rule it replaces so it reads as a divider until you reach for it.
@@ -214,7 +192,7 @@ class RoundedButton(tk.Canvas):
     hover and pressed states that make the interface feel answerable.
     """
 
-    KINDS = ("primary", "secondary", "ghost", "danger")
+    KINDS = ("primary", "secondary", "ghost")
 
     def __init__(self, parent: tk.Misc, theme: Theme, text: str,
                  command: Optional[Callable[[], None]] = None,
@@ -244,10 +222,6 @@ class RoundedButton(tk.Canvas):
 
     # ------------------------------------------------------------- public API
 
-    def configure_text(self, text: str) -> None:
-        self._text = text
-        self._resize()
-
     def set_state(self, state: str) -> None:
         self._state = state
         self._draw()
@@ -255,11 +229,6 @@ class RoundedButton(tk.Canvas):
     def invoke(self) -> None:
         if self._state != "disabled" and self._command:
             self._command()
-
-    def restyle(self, theme: Theme) -> None:
-        self.theme = theme
-        self.configure(background=theme.color(self._surface))
-        self._resize()
 
     # ---------------------------------------------------------------- drawing
 
@@ -277,8 +246,6 @@ class RoundedButton(tk.Canvas):
         if self.kind == "primary":
             fill = c("accent_press") if self._pressed else c("accent_hover") if self._hover else c("accent")
             return fill, c("on_accent"), ""
-        if self.kind == "danger":
-            return (c("hover") if self._hover else c("bg")), c("danger"), c("border_strong")
         if self.kind == "ghost":
             return (c("hover") if self._hover else c(self._surface)), c("muted"), ""
         fill = c("hover") if (self._hover or self._pressed) else c("raised")

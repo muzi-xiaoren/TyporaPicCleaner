@@ -40,11 +40,35 @@ def _blank(text: str, start: int, end: int) -> str:
     Masking rather than deleting means every later regex match still reports
     the original line number.
     """
-    chunk = "".join("\n" if ch == "\n" else " " for ch in text[start:end])
-    return text[:start] + chunk + text[end:]
+    return _blank_spans(text, [(start, end)])
+
+
+_NOT_NEWLINE_RE = re.compile(r"[^\n]")
+
+
+def _blank_spans(text: str, spans: list[tuple[int, int]]) -> str:
+    """:func:`_blank` for many spans at once; they must be sorted and disjoint.
+
+    One rebuild of the string rather than one per span, which is the difference
+    between linear and quadratic on a long note full of code.
+    """
+    if not spans:
+        return text
+    pieces: list[str] = []
+    cursor = 0
+    for start, end in spans:
+        pieces.append(text[cursor:start])
+        pieces.append(_NOT_NEWLINE_RE.sub(" ", text[start:end]))
+        cursor = end
+    pieces.append(text[cursor:])
+    return "".join(pieces)
 
 
 _FENCE_RE = re.compile(r"^([ \t]{0,3})(`{3,}|~{3,})(.*)$")
+# An inline span ends at the next equal run of backticks -- but never beyond the
+# paragraph it started in.  Without that limit one stray backtick pairs up with
+# another a page further down and every link between them goes unseen.
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)((?:(?!\n[ \t]*\n).)+?)(?<!`)\1(?!`)", re.S)
 
 
 def mask_code(text: str) -> str:
@@ -56,27 +80,32 @@ def mask_code(text: str) -> str:
     regex unreliable) and inline spans use backtick-run matching.
     """
     offset = 0
-    open_fence: str | None = None
+    open_fence: tuple[str, int] | None = None  # (character, run length)
     spans: list[tuple[int, int]] = []
     for line in text.split("\n"):
         line_end = offset + len(line)
         match = _FENCE_RE.match(line)
+        if match:
+            char, length, info = match.group(2)[0], len(match.group(2)), match.group(3)
         if open_fence is None:
-            if match:
-                open_fence = match.group(2)[0] * 3
+            # "```like this```" on one line is an inline span, not a fence: a
+            # backtick fence may not carry a backtick in its info string.
+            if match and not (char == "`" and "`" in info):
+                open_fence = (char, length)
                 spans.append((offset, line_end))
         else:
             spans.append((offset, line_end))
-            # A closing fence uses the same character and carries no info string.
-            if match and match.group(2)[0] * 3 == open_fence and not match.group(3).strip():
+            # Closed only by the same character, at least as long a run, and no
+            # info string.  The length matters: a four-backtick block exists to
+            # hold three-backtick ones, and ending it at the first of those
+            # would turn its real closing line into a new opening fence that
+            # swallows the rest of the note.
+            if match and char == open_fence[0] and length >= open_fence[1] and not info.strip():
                 open_fence = None
         offset = line_end + 1
 
-    for start, end in spans:
-        text = _blank(text, start, end)
-    for match in re.finditer(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", text, re.S):
-        text = _blank(text, match.start(), match.end())
-    return text
+    text = _blank_spans(text, spans)
+    return _blank_spans(text, [match.span() for match in _INLINE_CODE_RE.finditer(text)])
 
 
 def split_front_matter(text: str) -> tuple[str, str]:

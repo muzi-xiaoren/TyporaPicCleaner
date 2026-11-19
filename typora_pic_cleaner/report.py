@@ -7,17 +7,18 @@ from dataclasses import asdict
 
 from .compare import Analysis
 from .i18n import t
+from .paths import escapes
 
 _UNITS = ("B", "KB", "MB", "GB", "TB")
 
 
 def human_size(num_bytes: int) -> str:
     size = float(num_bytes)
-    for unit in _UNITS:
-        if size < 1024 or unit == _UNITS[-1]:
+    for unit in _UNITS[:-1]:
+        if size < 1024:
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024
-    return f"{size:.1f} TB"
+    return f"{size:.1f} {_UNITS[-1]}"
 
 
 def _rel(path: str, root: str) -> str:
@@ -25,7 +26,7 @@ def _rel(path: str, root: str) -> str:
         relative = os.path.relpath(path, root)
     except ValueError:
         return path
-    return path if relative.startswith(os.pardir) else relative
+    return path if escapes(relative) else relative
 
 
 def display_path(path: str, roots: tuple, extra: tuple = ()) -> str:
@@ -118,12 +119,16 @@ def human_report(
         lines.append(t("report.external.header", count=len(analysis.external)))
         for site in analysis.external[:limit] if limit else analysis.external:
             lines.append(f"  {display_path(site.md, roots)}:{site.line}  ->  {site.resolved}")
+        if limit and len(analysis.external) > limit:
+            lines.append("  " + t("report.more", count=len(analysis.external) - limit))
         lines.append("")
 
     if analysis.errors:
         lines.append(t("report.warnings.header", count=len(analysis.errors)))
         for error in analysis.errors[:limit] if limit else analysis.errors:
             lines.append(f"  {error}")
+        if limit and len(analysis.errors) > limit:
+            lines.append("  " + t("report.more", count=len(analysis.errors) - limit))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"

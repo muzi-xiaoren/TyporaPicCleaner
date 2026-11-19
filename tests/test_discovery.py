@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from unittest import mock
 
 from typora_pic_cleaner.discovery import (
     Folder, FolderSet, discover, key_for, shorten, summarise, within,
@@ -90,6 +91,14 @@ class FolderSetTests(VaultTestCase):
         self.assertEqual(added, 0)
         self.assertFalse(folders.get("/notes").selected)
         self.assertEqual((folders.get("/notes").notes, folders.get("/notes").images), (9, 4))
+
+    def test_a_folder_picked_by_hand_is_ticked_even_if_a_search_left_it_unticked(self):
+        folders = FolderSet([Folder("/notes", selected=False)])
+        folders.include(Folder("/notes", selected=True, notes=9, images=4, counted=True))
+        folders.include(Folder("/other", selected=True))
+        self.assertTrue(folders.get("/notes").selected)
+        self.assertEqual(folders.get("/notes").notes, 9)
+        self.assertEqual([f.path for f in folders], ["/notes", "/other"])
 
     def test_merge_reports_and_appends_new_folders(self):
         folders = FolderSet([Folder("/notes")])
@@ -184,12 +193,34 @@ class NoiseFilterTests(VaultTestCase):
     def names(self, parent=None):
         return {os.path.relpath(c.path, parent or self.vault) for c in discover(parent or self.vault)}
 
+    def at_home(self):
+        """Make the vault the user's home folder for the length of a test."""
+        patcher = mock.patch.dict(os.environ, {"HOME": self.vault, "USERPROFILE": self.vault})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_software_trees_are_never_offered(self):
         self.write("Notes/diary.md", "# mine")
-        for junk in ("anaconda3/Lib/site-packages/pkg", "Program Files/app",
-                     "$RECYCLE.BIN/x", "AppData/Roaming/app", "Library/thing"):
+        for junk in ("anaconda3/Lib/site-packages/pkg", "$RECYCLE.BIN/x", "tools/site-packages/pkg"):
             self.write(junk + "/notes.md", "# not mine")
         self.assertEqual(self.names(), {os.curdir, "Notes"})
+
+    def test_system_folders_are_skipped_where_the_system_keeps_them(self):
+        self.at_home()
+        self.write("Notes/diary.md", "# mine")
+        for junk in ("Program Files/app", "AppData/Roaming/app", "Library/thing", "Windows/help"):
+            self.write(junk + "/notes.md", "# not mine")
+        self.assertEqual(self.names(), {os.curdir, "Notes"})
+
+    def test_the_same_names_deeper_down_are_ordinary_folders(self):
+        # ~/Library is macOS's; ~/Notes/Library is a reading list.
+        self.at_home()
+        self.write("Notes/Library/books.md", "# mine")
+        self.write("Notes/Windows/tips.md", "# mine")
+        self.assertEqual(
+            self.names(),
+            {os.curdir, "Notes", os.path.join("Notes", "Library"), os.path.join("Notes", "Windows")},
+        )
 
     def test_a_folder_of_packaged_documentation_is_left_out(self):
         self.write("Notes/diary.md", "# mine")

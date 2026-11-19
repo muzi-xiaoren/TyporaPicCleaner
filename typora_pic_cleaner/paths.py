@@ -47,17 +47,34 @@ class PathKeyer:
 
     def __init__(self, probe_dir: str | None = None) -> None:
         self.fold_case = is_case_insensitive_fs(probe_dir)
+        self._keys: dict[str, str] = {}
 
     def key(self, path: str) -> str:
         """Normalise *path* into a value that compares equal for equal files."""
+        cached = self._keys.get(path)
+        if cached is not None:
+            return cached
         # realpath also normalises "." / ".." and collapses separators, and it
-        # keeps working on paths that do not exist.
+        # keeps working on paths that do not exist.  It costs a stat per path
+        # component, and one analysis asks about the same paths repeatedly --
+        # hence the memo, which lives only as long as that analysis does.
         normalised = os.path.normcase(os.path.realpath(os.path.abspath(path)))
-        return normalised.lower() if self.fold_case else normalised
+        key = normalised.lower() if self.fold_case else normalised
+        self._keys[path] = key
+        return key
 
 
 def has_image_ext(path: str, extra_exts: frozenset[str] = frozenset()) -> bool:
     return os.path.splitext(path)[1].lower() in (IMAGE_EXTS | extra_exts)
+
+
+def escapes(relative: str) -> bool:
+    """Does a ``relpath`` result climb out of the directory it was taken from?
+
+    Compared by component, not by prefix: ``..thumb.png`` is an ordinary file
+    name that merely starts with two dots.
+    """
+    return relative == os.pardir or relative.startswith(os.pardir + os.sep)
 
 
 def is_within(path: str, root: str) -> bool:
@@ -69,7 +86,7 @@ def is_within(path: str, root: str) -> bool:
     root_real = os.path.realpath(os.path.abspath(root))
     path_real = os.path.realpath(os.path.abspath(path))
     try:
-        return not os.path.relpath(path_real, root_real).startswith(os.pardir)
+        return not escapes(os.path.relpath(path_real, root_real))
     except ValueError:
         # Different drives on Windows -- definitively outside.
         return False
@@ -106,6 +123,20 @@ def _has_foreign_scheme(raw: str) -> bool:
     return head[0].isalpha() and all(ch.isalnum() or ch in "+-." for ch in head)
 
 
+def _may_be_a_file_name(raw: str) -> bool:
+    """A "scheme" that is really a picture with a colon in its name.
+
+    ``shot:2.png`` parses as a URL with the scheme ``shot``, but no real scheme
+    is followed by something ending in an image extension without a ``//``
+    authority first.  Keeping it as a candidate path costs nothing if wrong;
+    dropping it costs a picture that is in use.
+    """
+    rest = raw.split(":", 1)[1]
+    if rest.startswith("//"):
+        return False
+    return has_image_ext(rest.split("#", 1)[0].split("?", 1)[0])
+
+
 def reference_variants(raw: str) -> list[str]:
     """Expand one written-down link into every path string it might mean.
 
@@ -120,7 +151,7 @@ def reference_variants(raw: str) -> list[str]:
         return []
     if raw.lower().startswith("file://"):
         raw = _from_file_url(raw)
-    elif _has_foreign_scheme(raw):
+    elif _has_foreign_scheme(raw) and not _may_be_a_file_name(raw):
         return []
 
     seeds = {raw}

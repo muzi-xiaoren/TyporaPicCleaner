@@ -55,10 +55,15 @@ def save(**values: object) -> bool:
     """Merge *values* into the settings file; returns whether it was written."""
     data = load()
     data.update(values)
+    # Written beside the real file and swapped in: the folder list is the one
+    # thing here that is tedious to rebuild, and a crash half-way through a
+    # plain write would leave a truncated file that reads back as "no settings".
+    scratch = config_path() + ".tmp"
     try:
         os.makedirs(config_dir(), exist_ok=True)
-        with open(config_path(), "w", encoding="utf-8") as handle:
+        with open(scratch, "w", encoding="utf-8") as handle:
             json.dump(data, handle, ensure_ascii=False, indent=2)
+        os.replace(scratch, config_path())
         return True
     except OSError:
         # Read-only home, sandboxing, a full disk: losing a preference is not
@@ -76,14 +81,16 @@ def save_language(language: str) -> bool:
 
 
 def load_note_folders() -> List[Tuple[str, bool]]:
-    """The remembered notes folders as ``(path, selected)``, in the saved order.
+    """The remembered notes folders as ``(path, selected)``, in the saved order."""
+    return _load_folders("note_folders")
 
-    Order is preserved because the first folder anchors the undo history; a
-    reshuffle between runs would scatter it across several trash folders.
-    """
+
+def _load_folders(name: str) -> List[Tuple[str, bool]]:
+    """A saved folder list.  A bare string is read as a ticked folder, which is
+    how the image folders were stored before they remembered their tick."""
     out: List[Tuple[str, bool]] = []
     seen = set()
-    for entry in load().get("note_folders") or []:
+    for entry in load().get(name) or []:
         if isinstance(entry, str):
             path, selected = entry, True
         elif isinstance(entry, dict) and isinstance(entry.get("path"), str):
@@ -117,12 +124,14 @@ def _load_paths(key: str) -> List[str]:
     return out
 
 
-def load_image_folders() -> List[str]:
-    return _load_paths("image_folders")
+def load_image_folders() -> List[Tuple[str, bool]]:
+    return _load_folders("image_folders")
 
 
-def save_image_folders(folders: List[str]) -> bool:
-    return save(image_folders=list(folders))
+def save_image_folders(folders: List[Tuple[str, bool]]) -> bool:
+    return save(
+        image_folders=[{"path": path, "selected": bool(selected)} for path, selected in folders]
+    )
 
 
 def load_scan_parents() -> List[str]:

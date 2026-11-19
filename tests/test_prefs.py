@@ -84,6 +84,13 @@ if __name__ == "__main__":
 
 
 class RememberedFoldersTests(ConfigIsolationMixin):
+    def test_saving_swaps_the_file_in_and_leaves_no_scratch_copy(self):
+        directory = self.isolate_config()
+        prefs.save(language="zh")
+        prefs.save(paranoid=True)
+        self.assertEqual(["config.json"], os.listdir(directory))
+        self.assertEqual({"language": "zh", "paranoid": True}, prefs.load())
+
     def setUp(self):
         self.directory = self.isolate_config()
 
@@ -107,9 +114,13 @@ class RememberedFoldersTests(ConfigIsolationMixin):
         prefs.save(note_folders=[None, 3, {}, {"path": ""}, {"path": "/ok"}])
         self.assertEqual([("/ok", True)], prefs.load_note_folders())
 
-    def test_image_folders_round_trip_and_deduplicate(self):
-        prefs.save_image_folders(["/pics", "/pics", "/more"])
-        self.assertEqual(["/pics", "/more"], prefs.load_image_folders())
+    def test_image_folders_round_trip_with_their_tick_and_deduplicate(self):
+        prefs.save_image_folders([("/pics", True), ("/pics", False), ("/more", False)])
+        self.assertEqual([("/pics", True), ("/more", False)], prefs.load_image_folders())
+
+    def test_image_folders_saved_by_an_older_release_read_as_ticked(self):
+        prefs.save(image_folders=["/pics"])
+        self.assertEqual([("/pics", True)], prefs.load_image_folders())
 
     def test_scan_parents_keep_only_the_recent_few(self):
         prefs.save_scan_parents(["/p%d" % index for index in range(20)])

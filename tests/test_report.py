@@ -67,3 +67,15 @@ class ImageFolderDisplayTests(VaultTestCase):
             os.path.join("img", "a.png"),
             display_path(os.path.join(notes, "img", "a.png"), (notes,), (pics,)),
         )
+
+
+class TruncationTests(VaultTestCase):
+    def test_every_cut_short_section_says_how_much_is_missing(self):
+        outside = self.image("elsewhere/pic.png")
+        self.write("notes/note.md", "".join(f"![]({outside})\n" for _ in range(3)))
+        analysis = analyze(self.path("notes"))
+        analysis.errors = ["one", "two", "three"]
+        self.assertEqual(3, len(analysis.external))
+        report = human_report(analysis, limit=2)
+        self.assertEqual(2, report.count("and 1 more"))
+        self.assertNotIn("more", human_report(analysis, limit=0))

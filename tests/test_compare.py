@@ -79,6 +79,21 @@ class BrokenAndExternalTests(VaultTestCase):
         self.write("note.md", "![](https://example.com/a.png)\n![](data:image/png;base64,AA)\n")
         self.assertEqual([], analyze(self.vault).broken)
 
+    def test_only_a_link_that_names_a_picture_can_be_a_broken_picture(self):
+        # All of these are collected as possible references and none resolves,
+        # but an in-page anchor is not a missing image.
+        self.write(
+            "note.md",
+            "[toc](#section)\n[next](missing-note.md)\n<a href=\"#top\">up</a>\n"
+            "<meta content=\"width=device-width\">\n![](gone.png#frag)\n",
+        )
+        self.assertEqual(["gone.png#frag"], [site.raw for site in analyze(self.vault).broken])
+
+    def test_an_extra_extension_counts_as_a_picture_when_broken(self):
+        self.write("note.md", "![](gone.psd)\n")
+        self.assertEqual([], analyze(self.vault).broken)
+        self.assertEqual(1, len(analyze(self.vault, extra_exts=frozenset({".psd"})).broken))
+
     def test_ambiguous_title_syntax_reports_one_broken_site_not_two(self):
         self.write("note.md", '![](img/gone.png "caption")\n')
         self.assertEqual(1, len(analyze(self.vault).broken))

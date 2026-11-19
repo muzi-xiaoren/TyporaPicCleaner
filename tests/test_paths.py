@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
 import unittest
 
 from typora_pic_cleaner.paths import (
@@ -56,6 +58,16 @@ class VariantTests(unittest.TestCase):
         self.assertIn("C:/pics/a.png", reference_variants("file:///C:/pics/a.png"))
 
 
+class ColonInNameTests(unittest.TestCase):
+    def test_a_picture_with_a_colon_in_its_name_is_not_mistaken_for_a_url(self):
+        self.assertIn("shot:2.png", reference_variants("shot:2.png"))
+
+    def test_real_schemes_are_still_left_alone(self):
+        self.assertEqual([], reference_variants("typora://app/img/a.png"))
+        self.assertEqual([], reference_variants("obsidian:open?vault=x"))
+        self.assertEqual([], reference_variants("mailto:someone@example.com"))
+
+
 class ResolveTests(unittest.TestCase):
     def test_relative_resolves_against_the_note_first(self):
         got = resolve_reference("img/a.png", anchored("v", "notes"), (anchored("v"),))
@@ -93,6 +105,14 @@ class GuardTests(unittest.TestCase):
         self.assertFalse(has_image_ext("a.md"))
         self.assertFalse(has_image_ext("a.png.txt"))
         self.assertTrue(has_image_ext("a.psd", frozenset({".psd"})))
+
+
+class DotDotNameTests(unittest.TestCase):
+    def test_a_name_that_merely_starts_with_two_dots_is_still_inside(self):
+        root = os.path.realpath(tempfile.mkdtemp(prefix="tpc-dots-"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        self.assertTrue(is_within(os.path.join(root, "..thumb.png"), root))
+        self.assertFalse(is_within(os.path.join(root, "..", "thumb.png"), root))
 
 
 class KeyerTests(unittest.TestCase):

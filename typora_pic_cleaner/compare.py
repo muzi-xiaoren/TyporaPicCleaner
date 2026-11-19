@@ -6,9 +6,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Sequence, Union
 
-from .paths import PathKeyer, is_within, resolve_reference
+from .paths import PathKeyer, has_image_ext, is_within, reference_variants, resolve_reference
 from .refs import Reference, extract_references, front_matter_root_url
-from .scanner import ImageFile, Walk, detect_layouts, merge, read_text_best_effort, walk_tree
+from .scanner import (
+    MARKDOWN_EXTS, ImageFile, Walk, detect_layouts, merge, read_text_best_effort, walk_tree,
+)
 
 
 @dataclass
@@ -42,7 +44,7 @@ class Analysis:
 
     @property
     def md_root(self) -> str:
-        """The folder that anchors the undo history and relative display paths."""
+        """The first notes folder, kept for scripts written against one-folder releases."""
         return self.md_roots[0]
 
     @property
@@ -62,11 +64,7 @@ def _delete_roots(md_roots: tuple[str, ...], image_dirs: tuple[str, ...]) -> tup
 
 
 def _normalise_roots(md_roots: "Union[str, Sequence[str]]") -> tuple[str, ...]:
-    """Accept one folder or many, and drop duplicates while keeping the order.
-
-    The first survivor stays first on purpose: it is where the trash folder and
-    the undo history go, so it must not drift between runs.
-    """
+    """Accept one folder or many, and drop duplicates while keeping the order."""
     if isinstance(md_roots, str):
         md_roots = [md_roots]
     seen: dict[str, None] = {}
@@ -125,9 +123,9 @@ def analyze(
                 candidates.extend(resolve_reference(raw, md_dir, bases))
             if not candidates:
                 continue  # remote URL or data: -- nothing on this disk to keep
-            matched = [c for c in candidates if keyer.key(c) in on_disk]
+            matched = {keyer.key(c) for c in candidates} & on_disk.keys()
             if matched:
-                hit_keys.update(keyer.key(c) for c in matched)
+                hit_keys.update(matched)
                 continue
             found = [c for c in candidates if os.path.exists(c)]
             if found:
@@ -136,7 +134,12 @@ def analyze(
                 if not any(is_within(found[0], root) for root in delete_roots):
                     analysis.external.append(_site(md_path, ref, found[0]))
                 continue
-            analysis.broken.append(_site(md_path, ref, None))
+            # Every link is collected, because any of them may keep a picture
+            # alive -- but only one that names a picture is worth reporting as
+            # broken.  "#heading", "other-note.md" and <meta content="..."> all
+            # arrive here too, and would bury the real findings.
+            if _names_an_image(ref, extra_exts):
+                analysis.broken.append(_site(md_path, ref, None))
 
     analysis.referenced = len(hit_keys)
     analysis.unreferenced = sorted(
@@ -162,6 +165,14 @@ def _bases_for(
     return (os.path.abspath(base),) + extra_bases
 
 
+def _names_an_image(ref: Reference, extra_exts: frozenset[str]) -> bool:
+    return any(
+        has_image_ext(variant, extra_exts)
+        for raw in ref.raws
+        for variant in reference_variants(raw)
+    )
+
+
 def _site(md: str, ref: Reference, resolved: str | None) -> RefSite:
     return RefSite(md=md, line=ref.line, raw=ref.raw, kind=ref.kind, resolved=resolved)
 
@@ -183,10 +194,7 @@ def _orphan_asset_dirs(walk: Walk, unreferenced: list[ImageFile], keyer: PathKey
     for asset_dir in walk.asset_dirs:
         stem = os.path.basename(asset_dir)[: -len(".assets")]
         parent = os.path.dirname(asset_dir)
-        if any(
-            keyer.key(os.path.join(parent, stem + ext)) in md_keys
-            for ext in (".md", ".markdown", ".mdown", ".mkd")
-        ):
+        if any(keyer.key(os.path.join(parent, stem + ext)) in md_keys for ext in MARKDOWN_EXTS):
             continue
         contents = images_by_dir.get(keyer.key(asset_dir), [])
         if contents and all(keyer.key(path) in dead_keys for path in contents):

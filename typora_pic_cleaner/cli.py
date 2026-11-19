@@ -9,7 +9,10 @@ import os
 import sys
 
 from . import __version__
-from .actions import UnsafePath, list_batches, move_to_trash, restore_batch, trash_root_for
+from .actions import (
+    UnsafePath, list_batches, move_to_trash, restore_everywhere, top_level_roots,
+    trash_destinations, trash_root_for,
+)
 from .compare import analyze
 from .discovery import DEFAULT_MAX_DEPTH, discover
 from .i18n import SUPPORTED, set_language, t
@@ -36,7 +39,7 @@ def _preselect_language(argv: list[str]) -> None:
     set_language(None)
 
 
-def _add_scan_args(parser: argparse.ArgumentParser) -> None:
+def _add_scan_args(parser: argparse.ArgumentParser, with_json: bool = True) -> None:
     # Several folders at once, because Typora users rarely keep everything in
     # one tree -- and scanning them separately would call a picture used by
     # another folder's note unreferenced.
@@ -45,7 +48,10 @@ def _add_scan_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--paranoid", action="store_true", help=t("cli.help.paranoid"))
     parser.add_argument("--ext", action="append", metavar=".EXT", default=[], help=t("cli.help.ext"))
     parser.add_argument("--limit", type=int, default=50, help=t("cli.help.limit"))
-    parser.add_argument("--json", action="store_true", help=t("cli.help.json"))
+    if with_json:
+        # Not on ``clean``: it prompts and reports as it goes, and a flag that
+        # is accepted and then ignored is worse than one that is refused.
+        parser.add_argument("--json", action="store_true", help=t("cli.help.json"))
 
 
 def _run_analysis(args: argparse.Namespace):
@@ -89,7 +95,11 @@ def cmd_clean(args: argparse.Namespace) -> int:
     if not analysis.unreferenced:
         return 0
 
-    destination = t("cli.clean.system_trash") if args.trash_system else trash_root_for(analysis.md_root)
+    doomed = [image.path for image in analysis.unreferenced]
+    destination = (
+        t("cli.clean.system_trash") if args.trash_system
+        else ", ".join(trash_destinations(doomed, analysis.roots))
+    )
     sys.stdout.write(
         "\n"
         + t(
@@ -105,9 +115,8 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 1
 
     batch = move_to_trash(
-        [image.path for image in analysis.unreferenced],
+        doomed,
         roots=analysis.roots,
-        md_root=analysis.md_root,
         system_trash=args.trash_system,
         extra_exts=_normalise_exts(args.ext),
         prune_empty_dirs=not args.no_prune,
@@ -121,22 +130,29 @@ def cmd_clean(args: argparse.Namespace) -> int:
         sys.stderr.write(t("cli.clean.failures", count=len(batch.failures)) + "\n")
         for failure in batch.failures:
             sys.stderr.write(f"  {failure}\n")
-    if not args.trash_system:
+    if not args.trash_system and batch.entries:
+        folders = " ".join(_shell_word(root) for root in batch.roots)
         sys.stdout.write(
             t("cli.clean.undo_hint", batch=batch.batch_id) + "\n"
-            f"  typora-pic-cleaner restore {analysis.md_root} --id {batch.batch_id}\n"
+            f"  typora-pic-cleaner restore {folders} --id {batch.batch_id}\n"
         )
     return 1 if batch.failures else 0
 
 
+def _shell_word(path: str) -> str:
+    return f'"{path}"' if " " in path else path
+
+
 def cmd_restore(args: argparse.Namespace) -> int:
-    root = os.path.abspath(args.root)
+    roots = top_level_roots(args.root or ["."])
     if args.list:
-        batches = list_batches(root)
-        if not batches:
-            sys.stdout.write(t("cli.restore.none", path=trash_root_for(root)) + "\n")
+        recorded = [(root, batch) for root in roots for batch in list_batches(root)]
+        if not recorded:
+            where = ", ".join(trash_root_for(root) for root in roots)
+            sys.stdout.write(t("cli.restore.none", path=where) + "\n")
             return 0
-        for batch in batches:
+        recorded.sort(key=lambda pair: pair[1].get("batch_id") or "", reverse=True)
+        for root, batch in recorded:
             entries = batch.get("entries", [])
             summary = t(
                 "cli.restore.batch_line",
@@ -144,12 +160,15 @@ def cmd_restore(args: argparse.Namespace) -> int:
                 size=human_size(sum(entry.get("size", 0) for entry in entries)),
             )
             where = t("cli.restore.system_trash_tag") if batch.get("system_trash") else ""
+            # One clean-up leaves a batch in every folder it touched, so with
+            # several folders the line has to say which one it is about.
+            folder = f"  {root}" if len(roots) > 1 else ""
             sys.stdout.write(
-                f"{batch.get('batch_id', '?')}  {batch.get('created', '?')}  {summary}{where}\n"
+                f"{batch.get('batch_id', '?')}  {batch.get('created', '?')}  {summary}{where}{folder}\n"
             )
         return 0
 
-    result = restore_batch(root, batch_id=args.id, dry_run=args.dry_run)
+    result = restore_everywhere(roots, batch_id=args.id, dry_run=args.dry_run)
     key = "cli.restore.would" if args.dry_run else "cli.restore.done"
     sys.stdout.write(t(key, count=len(result.restored)) + "\n")
     for path in result.skipped:
@@ -200,7 +219,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
 def cmd_gui(args: argparse.Namespace) -> int:
     from .gui import main as gui_main
 
-    roots = [os.path.abspath(root) for root in args.root if root != "."]
+    roots = [os.path.abspath(root) for root in args.root]
     return gui_main(initial_roots=roots)
 
 
@@ -219,14 +238,14 @@ def build_parser() -> argparse.ArgumentParser:
     scan.set_defaults(func=cmd_scan)
 
     clean = subparsers.add_parser("clean", help=t("cli.help.clean"))
-    _add_scan_args(clean)
+    _add_scan_args(clean, with_json=False)
     clean.add_argument("-y", "--yes", action="store_true", help=t("cli.help.yes"))
     clean.add_argument("--trash-system", action="store_true", help=t("cli.help.trash_system"))
     clean.add_argument("--no-prune", action="store_true", help=t("cli.help.no_prune"))
     clean.set_defaults(func=cmd_clean)
 
     restore = subparsers.add_parser("restore", help=t("cli.help.restore"))
-    restore.add_argument("root", nargs="?", default=".", help=t("cli.help.restore_root"))
+    restore.add_argument("root", nargs="*", default=["."], help=t("cli.help.restore_root"))
     restore.add_argument("--id", help=t("cli.help.id"))
     restore.add_argument("--list", action="store_true", help=t("cli.help.list"))
     restore.add_argument("--dry-run", action="store_true", help=t("cli.help.dry_run"))

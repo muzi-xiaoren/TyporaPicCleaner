@@ -11,7 +11,7 @@
 删图是不可逆操作里最让人后悔的一类，所以这个工具的默认行为很保守：
 
 - `scan` **只报告，不动任何文件**。想真的清理必须显式用 `clean`。
-- `clean` 不调用 `rm`，而是把文件**移动**到笔记库内的 `.typora-pic-trash/<时间戳>/`，同时写一份 `manifest.json`。
+- `clean` 不调用 `rm`，而是把文件**移动**到它所在那个文件夹里的 `.typora-pic-trash/<时间戳>/`，同时写一份 `manifest.json`。图片不会离开自己所在的文件夹（也就不会跨盘复制）。
 - `restore` 可以按批次一键还原；还原时若原位置已有同名文件，**不会覆盖**，而是跳过并告诉你。
 - 两道独立护栏：只处理图片扩展名白名单里的文件，且文件必须位于你指定的扫描目录内（`../../` 之类的路径逃不出去）。
 
@@ -35,9 +35,9 @@
 |---|---|---|
 | macOS（Apple 芯片） | `TyporaPicCleaner-macos-arm64.zip` | `typora-pic-cleaner-cli-macos-arm64.zip` |
 | macOS（Intel） | `TyporaPicCleaner-macos-x86_64.zip` | `typora-pic-cleaner-cli-macos-x86_64.zip` |
-
-> Intel 版依赖 GitHub 的 Intel 构建机,偶尔会缺。如果 Release 里没有 x86_64 的包,直接从源码跑即可(见下),功能完全一样。
 | Windows | `TyporaPicCleaner-windows.exe` | `typora-pic-cleaner-cli-windows.exe` |
+
+> Intel 版依赖 GitHub 的 Intel 构建机，偶尔会缺。如果 Release 里没有 x86_64 的包，直接从源码跑即可（见下），功能完全一样。
 
 macOS 的两个都是 zip，**这是故意的**：浏览器下载裸的 Unix 可执行文件会剥掉执行权限，装在 zip 里才能保住。解压后：
 
@@ -86,7 +86,7 @@ typora-pic-cleaner scan ~/Documents/Notes
 
 | 方式 | 做法 | 是否记住 |
 |---|---|---|
-| 图形界面 | 顶部菜单 **语言 / Language** → 简体中文 | **会记住**，下次启动仍是中文 |
+| 图形界面 | 右上角 **⚙ 设置** → 简体中文 | **会记住**，下次启动仍是中文 |
 | 命令行单次 | `typora-pic-cleaner --lang zh scan ~/Notes` | 仅本次 |
 | 环境变量 | `export TPC_LANG=zh` | 由你的 shell 配置决定 |
 
@@ -124,8 +124,11 @@ typora-pic-cleaner discover ~/Documents
 
 | 跳过什么 | 例子 |
 |---|---|
-| 系统和软件目录 | `$RECYCLE.BIN`、`Program Files`、`AppData`、`Windows`、`Library`、`anaconda3`、`site-packages`、`vendor` |
+| 软件目录（出现在哪都跳过） | `$RECYCLE.BIN`、`System Volume Information`、`anaconda3`、`site-packages` |
+| 系统目录（**只在盘根和家目录这一层**跳过） | `E:\Windows`、`C:\Program Files`、`C:\Users\你\AppData`、`~/Library`、`~/Applications` |
 | **整个文件夹的 md 全是软件自带文档** | 只有 `README.md` / `CHANGELOG.md` / `LICENSE.md` 之类的目录 |
+
+系统目录只认位置不认名字：`~/Library` 是 macOS 的，但 `~/Notes/Library` 是你自己的文件夹，照常列出。
 
 这些 md 也**不计入上级的数量**——否则一个塞了上千个 vendored README 的目录会显示成全盘最大的笔记库。跳过了多少会在末尾告诉你。
 
@@ -154,7 +157,7 @@ Unreferenced images (44, 31.2 MB reclaimable):
   4.9 MB  notes/draft.assets/image-20240102.png
   ...
 
-Orphaned .assets folders (2, note file is gone):
+Orphaned .assets folders (2, the note file is gone):
   notes/deleted-post.assets
 
 Broken references (3, the note points at a missing file):
@@ -167,7 +170,7 @@ Broken references (3, the note points at a missing file):
 |---|---|
 | Unreferenced images | 磁盘上有、没有任何笔记引用 → `clean` 会移走这些 |
 | Orphaned .assets folders | `foo.md` 已删但 `foo.assets/` 还在，且里面的图全都没人用 |
-| Broken references | 笔记里写了引用但文件不存在 → 帮你反向发现笔记坏图 |
+| Broken references | 笔记里引用了一张图但文件不存在 → 帮你反向发现笔记坏图（`#锚点`、指向别的笔记的链接不算在内） |
 | References outside the scanned tree | 引用指向扫描范围外的真实文件 → 这部分工具不做判断 |
 
 ### 真的清理
@@ -179,13 +182,15 @@ typora-pic-cleaner clean ~/Documents/Notes -y       # 跳过确认（脚本里�
 
 ### 撤销
 
-回收站和清理历史都放在**第一个**笔记文件夹下，所以还原时把它写在前面：
+每个文件夹有**自己的**回收站，一次清理在它动过的每个文件夹里各留一份记录，批次号相同。还原时把 `clean` 时写的那几个文件夹原样写上即可（`clean` 结束时会把这条命令打印出来）：
 
 ```bash
 typora-pic-cleaner restore ~/Documents/Notes --list        # 看清理历史
 typora-pic-cleaner restore ~/Documents/Notes               # 还原最近一次
-typora-pic-cleaner restore ~/Documents/Notes --id 20260903-224151
+typora-pic-cleaner restore ~/Documents/Notes ~/Documents/Work --id 20260903-224151
 ```
+
+还原时原位置已经有同名文件的会跳过；这些文件仍留在回收站里，历史记录里只保留它们。
 
 ### 图形界面
 
@@ -197,19 +202,22 @@ typora-pic-cleaner gui
 
 1. 点 **查找文件夹…**，选一个上层目录（比如 `~/Documents`），工具会把里面像笔记库的文件夹列出来，每行带笔记数和图片数。
 2. **逐个勾选**要扫的——**搜索出来的默认一个都不勾**，没勾的不会被扫。勾上父文件夹时，它下面的子文件夹会自动标成「已含在上级」，不会被重复统计。
-3. 单独的文件夹用 **添加…** 手动加；不想要的选中按 **移除**（或按 Delete 键）。
+3. 单独的文件夹用 **添加…** 手动加，加进来的直接是勾上的；不想要的点一下选中，再按 **移除**（或 Delete 键）。
 4. 图片存在笔记文件夹之外的话，在下面的「图片文件夹」里添加。
 5. 点右下角**扫描**，然后在清单里取消勾选想留下的，最后**把勾选项移到回收站**。误删了点**撤销上次清理**。
+6. 结果上方的**详情…**能看到完整报告：哪些笔记里有失效引用、哪些引用指向了扫描范围之外、哪些文件没读出来。
+
+扫描之后如果又改了文件夹的勾选，**必须重新扫描才能清理**——旧结果没和你后来勾上的笔记比对过，界面会提示并锁住清理按钮。
 
 **勾选结果会被记住**，下次打开原样恢复；再次「查找文件夹」时，你已经勾上的**保持勾上**，新发现的仍然不勾。文件夹如果被你删掉了，会标成「已不存在」并自动跳过。
 
-侧栏和结果区之间、侧栏上下两块之间都可以**拖动分隔条**调宽窄，位置会被记住。外观跟随系统的浅色/深色，也可以在**设置**（菜单栏里也有）里固定，和语言一样会被记住。双击结果里的某一行可以直接在访达 / 资源管理器里定位那张图。
+侧栏和结果区之间、侧栏上下两块之间都可以**拖动分隔条**调宽窄，位置会被记住。外观跟随系统的浅色/深色，也可以在右上角的**设置**里固定（macOS 上屏幕顶部的菜单栏里也有），和语言一样会被记住。双击结果里的某一行可以直接在访达 / 资源管理器里定位那张图。
 
 关于「**使用系统回收站**」这个勾选项：
 
 | | 文件去哪 | 能不能用「撤销上次清理」 |
 |---|---|---|
-| **不勾（默认）** | 第一个笔记文件夹下的 `.typora-pic-trash/<时间戳>/`，附一份 `manifest.json` | ✅ 能，一键还原回原位 |
+| **不勾（默认）** | 图片所在文件夹里的 `.typora-pic-trash/<时间戳>/`，附一份 `manifest.json` | ✅ 能，一键还原回原位 |
 | **勾上** | 系统回收站 / 废纸篓 | ❌ 不能，只能你自己去回收站里找回 |
 
 勾上时确认框会明确写出这一点。不确定就别勾——默认那种撤销起来省事得多。
@@ -282,7 +290,7 @@ typora-pic-cleaner scan ~/Documents/Notes ~/Work/wiki ~/Desktop/临时笔记
 | `--paranoid` | 正文里**光是提到**某个文件名也算引用。保留得更多、删得更少，不确定时用它 |
 | `--ext .psd` | 把额外的扩展名也当图片，可重复 |
 | `--limit 0` | 列出全部（默认每节最多 50 行） |
-| `--json` | 输出机器可读的 JSON |
+| `--json` | 输出机器可读的 JSON（`scan`、`discover`） |
 | `--fail-on-findings` | 发现未引用图片时退出码为 2（CI 里用） |
 | `--trash-system` | 移到系统回收站而非笔记库内回收站，需要 `pip install send2trash` |
 | `--no-prune` | 保留因清理而变空的文件夹（默认会删掉空目录） |
