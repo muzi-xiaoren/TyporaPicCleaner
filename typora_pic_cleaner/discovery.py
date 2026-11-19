@@ -309,6 +309,10 @@ def discover(
         dirnames[:] = [d for d in dirnames if d.lower() not in UNINTERESTING_DIRS]
         if os.path.dirname(dirpath) == dirpath or key_for(dirpath) == home:
             dirnames[:] = [d for d in dirnames if d.lower() not in SYSTEM_DIRS_AT_TOP]
+        # The order a directory lists its children in is the filesystem's
+        # business -- alphabetical on APFS and NTFS, arbitrary on ext4 -- and
+        # the walk order is the order the rows are shown in.
+        dirnames.sort(key=str.lower)
         visited.append(dirpath)
         for dirname in dirnames:
             depths[os.path.join(dirpath, dirname)] = depths[dirpath] + 1
